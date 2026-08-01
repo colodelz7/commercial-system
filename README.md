@@ -1,4 +1,4 @@
-# 🗂️ Sistema Comercial — Colodel
+# 🗂️ Sistema Comercial - Colodel
 
 Sistema interno de gestão comercial com módulos de orçamentos, contratos, clientes, leads, diagnósticos e relatórios.
 
@@ -60,27 +60,6 @@ cp .env.example .env
 npm start
 ```
 
-## ⚙️ Variáveis de Ambiente
-
-```env
-# Autentique — assinatura digital
-AUTENTIQUE_TOKEN=
-APP_TOKEN=
-CRIADOR_EMAIL=
-WEBHOOK_SECRET=
-
-# Supabase
-SUPABASE_URL=
-SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
-
-# Nodemailer — e-mail
-MAIL_USER=
-MAIL_PASS=
-MAIL_TO=
-
-# CallMeBot — WhatsApp
-WHATSAPP_PHONE=
 CALLMEBOT_APIKEY=
 
 PORT=3000
