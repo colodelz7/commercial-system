@@ -1,50 +1,59 @@
-# 🗂️ Sistema Comercial - Colodel
+# 🌍 Monitoramento Ambiental Real-Time
 
-Sistema interno de gestão comercial com módulos de orçamentos, contratos, clientes, leads, diagnósticos e relatórios.
+Sistema de monitoramento climático e sísmico em tempo real com alertas automáticos, mapa interativo e comparativo de cidades.
 
 ## 🛠️ Tecnologias
 
 | Camada | Tecnologia |
 |---|---|
-| Frontend | HTML + CSS + JavaScript |
+| Frontend | React 19 + Vite 5 |
 | Backend | Node.js + Express |
-| Storage | `localStorage` |
-| Bibliotecas | jsPDF · Chart.js |
-| APIs | BrasilAPI · ViaCEP · Autentique · Nodemailer · CallMeBot |
+| Bibliotecas | Plotly.js · MapLibre GL |
+| APIs | OpenWeatherMap · USGS Earthquake · Nodemailer |
 
 ## 📁 Estrutura
 
 ```
 ├── frontend/
-│   ├── index.html      # Entrada da aplicação
-│   ├── index.js        # Lógica de UI e negócio
-│   ├── db.js           # Camada de dados (localStorage + auth)
-│   └── style.css       # Estilos
+│   ├── src/
+│   │   ├── components/     # Sidebar, Topbar, WorldClockBar, etc.
+│   │   │   └── tabs/       # Dashboard, Cards, SeismicMap, Compare, etc.
+│   │   ├── hooks/          # useCityData, useGeocodeSearch, useWorldClock, etc.
+│   │   ├── lib/            # api.js, plotlyTheme.js
+│   │   ├── App.jsx
+│   │   ├── main.jsx
+│   │   └── style.css       # Tema sci-fi azul escuro
+│   ├── index.html
+│   ├── vite.config.js
+│   └── package.json
 └── backend/
-    ├── back.js         # Servidor Express
+    ├── back.js             # Servidor Express + rotas da API
+    ├── alerts_log.json     # Gerado automaticamente ao disparar alertas
     ├── package.json
     ├── .gitignore
-    └── .env.example    # Variáveis de ambiente necessárias
+    └── .env                # Variáveis de ambiente necessárias
 ```
 
 ## 🚀 Rodando localmente
 
-### 💻 Frontend
-
-Basta abrir o `index.html` no navegador ou servir a pasta com qualquer servidor estático:
+### ⚙️ Backend
 
 ```bash
-npx serve .
+cd backend
+npm install
+npm start
 ```
 
-**Login padrão:** `admin` / `colodel`
-
-### ⚙️ Backend (opcional)
-
-Só é necessário se for usar assinatura digital via Autentique, recebimento de leads pelo formulário público, envio de notificações por e-mail e WhatsApp, ou recebimento de webhooks de assinatura.
+### 💻 Frontend
 
 ```bash
+cd frontend
 npm install
-cp .env.example .env
-npm start
+npm run dev
+```
+EMAIL_SMTP_PORT=587
+EMAIL_SMTP_USER=seu_email@gmail.com
+EMAIL_SMTP_PASS=sua_senha_de_app
+EMAIL_FROM=seu_email@gmail.com
+EMAIL_TO=destino@gmail.com
 ```
