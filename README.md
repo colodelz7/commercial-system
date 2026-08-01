@@ -1,6 +1,6 @@
-# 🌍 Monitoramento Ambiental Real-Time
+# 🗂️ Sistema Comercial — Colodel
 
-Sistema de monitoramento climático e sísmico em tempo real com alertas automáticos, mapa interativo e comparativo de cidades.
+Sistema interno de gestão comercial com módulos de orçamentos, contratos, clientes, leads, diagnósticos e relatórios.
 
 ## 🛠️ Tecnologias
 
@@ -8,41 +8,34 @@ Sistema de monitoramento climático e sísmico em tempo real com alertas automá
 |---|---|
 | Frontend | React 19 + Vite 5 |
 | Backend | Node.js + Express |
-| Bibliotecas | Plotly.js · MapLibre GL |
-| APIs | OpenWeatherMap · USGS Earthquake · Nodemailer |
+| Storage | `localStorage` |
+| Bibliotecas | jsPDF · Chart.js · react-chartjs-2 |
+| APIs | BrasilAPI · ViaCEP · Autentique · Nodemailer · CallMeBot |
 
 ## 📁 Estrutura
 
 ```
 ├── frontend/
 │   ├── src/
-│   │   ├── components/     # Sidebar, Topbar, WorldClockBar, etc.
-│   │   │   └── tabs/       # Dashboard, Cards, SeismicMap, Compare, etc.
-│   │   ├── hooks/          # useCityData, useGeocodeSearch, useWorldClock, etc.
-│   │   ├── lib/            # api.js, plotlyTheme.js
+│   │   ├── components/         # Wizards, modais e UI geral
+│   │   │   ├── tabs/           # ClientesTab, OrcamentosTab, RelatoriosTab, etc.
+│   │   │   └── modals/         # ClienteModal, OrcamentoViewModal, etc.
+│   │   ├── hooks/              # useAuth, useOrcamentos, useContratos, etc.
+│   │   ├── lib/                # db.js, api.js, format.js, contractDocument.js
 │   │   ├── App.jsx
-│   │   ├── main.jsx
-│   │   └── style.css       # Tema sci-fi azul escuro
+│   │   └── main.jsx
 │   ├── index.html
 │   ├── vite.config.js
+│   ├── .env.example
 │   └── package.json
 └── backend/
-    ├── back.js             # Servidor Express + rotas da API
-    ├── alerts_log.json     # Gerado automaticamente ao disparar alertas
+    ├── back.js                 # Servidor Express
     ├── package.json
     ├── .gitignore
-    └── .env                # Variáveis de ambiente necessárias
+    └── .env.example            # Variáveis de ambiente necessárias
 ```
 
 ## 🚀 Rodando localmente
-
-### ⚙️ Backend
-
-```bash
-cd backend
-npm install
-npm start
-```
 
 ### 💻 Frontend
 
@@ -51,9 +44,45 @@ cd frontend
 npm install
 npm run dev
 ```
-EMAIL_SMTP_PORT=587
-EMAIL_SMTP_USER=seu_email@gmail.com
-EMAIL_SMTP_PASS=sua_senha_de_app
-EMAIL_FROM=seu_email@gmail.com
-EMAIL_TO=destino@gmail.com
+
+Acesse `http://localhost:5173`.
+
+**Login padrão:** `admin` / `colodel`
+
+### ⚙️ Backend (opcional)
+
+Só é necessário para assinatura digital via Autentique, webhooks de contrato, e notificações por e-mail e WhatsApp.
+
+```bash
+cd backend
+npm install
+cp .env.example .env
+npm start
+```
+
+## ⚙️ Variáveis de Ambiente
+
+```env
+# Autentique — assinatura digital
+AUTENTIQUE_TOKEN=
+APP_TOKEN=
+CRIADOR_EMAIL=
+WEBHOOK_SECRET=
+
+# Supabase
+SUPABASE_URL=
+SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+
+# Nodemailer — e-mail
+MAIL_USER=
+MAIL_PASS=
+MAIL_TO=
+
+# CallMeBot — WhatsApp
+WHATSAPP_PHONE=
+CALLMEBOT_APIKEY=
+
+PORT=3000
+ALLOWED_ORIGIN=http://localhost:5173
 ```
