@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { R, calcO, qOf, mDoc, mPhone, discToPct, isValidEmail, isValidPhone, validaDoc } from '../lib/format';
 import { ORIGENS, RESPONSAVEIS } from '../lib/constants';
 import { useApiLookup } from '../hooks/useApiLookup';
+import MoneyInput from './MoneyInput';
 
 const PAY_OPCOES = ['PIX', 'Boleto bancário', 'Cartão de crédito', 'Cartão de débito', 'Dinheiro'];
 
@@ -67,8 +68,17 @@ export default function SpotWizard({ spot: spotInicial, catalog, onSalvar }) {
   const discPct = useMemo(() => discToPct(discInput, discMode, bruto), [discInput, discMode, bruto]);
   const totais = useMemo(() => calcO(spot.services, discPct), [spot.services, discPct]);
 
+  function onDiscBlur() {
+    const pctDigitado = discToPct(discInput, discMode, bruto, 999999);
+    if (pctDigitado > 20) {
+      alert('O desconto máximo permitido é 20%. Ajustei o valor para 20%.');
+      if (discMode === 'brl') setDiscInput(String(Math.round(bruto * 20 / 100 * 100) / 100).replace('.', ','));
+      else setDiscInput('20');
+    }
+  }
+
   function finalizar() {
-    onSalvar({ ...spot, disc: discPct, discMode, discRaw: discInput, status: spot.status || 'Em avaliação' });
+    onSalvar({ ...spot, disc: discPct, discMode, discRaw: discInput, status: spot.status || 'Em avaliação' }, { pdf: true });
   }
 
   const lista = cat === 'Todos' ? catalog.services : catalog.services.filter((s) => s.cat === cat);
@@ -164,8 +174,7 @@ export default function SpotWizard({ spot: spotInicial, catalog, onSalvar }) {
                   <div className="sitem" key={i}>
                     <div className="si-head"><span className="si-name">{s.name}</span><button className="btn-d" onClick={() => removerServico(i)}>✕</button></div>
                     <div className="si-pr">
-                      <label>R$</label>
-                      <input type="number" min="0" step="0.01" value={s.price} onChange={(e) => atualizarServico(i, { price: parseFloat(e.target.value) || 0 })} />
+                      <MoneyInput value={s.price} onChange={(v) => atualizarServico(i, { price: v })} />
                       <label style={{ marginLeft: 4 }}>Qtd</label>
                       <input type="number" min="1" step="1" style={{ width: 48 }} value={s.qtd || 1} onChange={(e) => atualizarServico(i, { qtd: Math.max(1, parseInt(e.target.value) || 1) })} />
                     </div>
@@ -212,7 +221,7 @@ export default function SpotWizard({ spot: spotInicial, catalog, onSalvar }) {
                       <button type="button" className={`dt-btn${discMode === 'pct' ? ' active' : ''}`} onClick={() => setDiscMode('pct')}>%</button>
                       <button type="button" className={`dt-btn${discMode === 'brl' ? ' active' : ''}`} onClick={() => setDiscMode('brl')}>R$</button>
                     </div>
-                    <input value={discInput} onChange={(e) => setDiscInput(e.target.value)} placeholder={discMode === 'pct' ? '% (máx. 20%)' : 'R$ de desconto'} />
+                    <input value={discInput} onChange={(e) => setDiscInput(e.target.value)} onBlur={onDiscBlur} placeholder={discMode === 'pct' ? '% (máx. 20%)' : 'R$ de desconto'} />
                   </div>
                 </div>
                 <div className="fin-row"><label>Desconto aplicado</label><span>{discMode === 'pct' ? `${discPct}%` : R(totais.d)}</span></div>

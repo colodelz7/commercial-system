@@ -1,11 +1,47 @@
-import { useState, useEffect } from 'react';
-import { R } from '../../lib/format';
+import { useState, useEffect, useMemo } from 'react';
+import { R, qOf, isCombo, comboParts, calcO, dataEfetiva } from '../../lib/format';
 import { REL_NUM, FUNIL_ETAPAS } from '../../hooks/useRelatorios';
 import RelCalendar from '../RelCalendar';
 import TrendChart from '../TrendChart';
 import FunnelChart from '../FunnelChart';
+import RevenuePieChart from '../RevenuePieChart';
+import MoneyInput from '../MoneyInput';
 
-export default function RelatoriosTab({ relatorios }) {
+const MESES_NOME = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+
+// Distribui a receita de cada contrato/SPOT entre as categorias dos serviços
+// que o compõem (combos são quebrados nos serviços que os formam), pesando
+// pelo preço de cada um — assim o total do gráfico bate com o vendido no mês.
+function receitaPorCategoria(contratos, spots, services, ym) {
+  const [ano, mes] = ym.split('-').map(Number);
+  const noMes = (item) => { const dt = dataEfetiva(item); return dt && dt.getFullYear() === ano && dt.getMonth() === mes - 1; };
+  const cats = {};
+  function distribui(svcs, valorReal) {
+    if (!(valorReal > 0)) return;
+    const linhas = [];
+    (svcs || []).forEach((s) => {
+      const q = qOf(s);
+      const partes = isCombo(s, services) ? comboParts(s, services) : [s];
+      partes.forEach((sv) => linhas.push({ cat: sv.cat || 'Outros', peso: (sv.price || 0) * q }));
+    });
+    const somaPeso = linhas.reduce((a, l) => a + l.peso, 0);
+    if (somaPeso <= 0) { cats.Outros = (cats.Outros || 0) + valorReal; return; }
+    linhas.forEach((l) => { cats[l.cat] = (cats[l.cat] || 0) + valorReal * (l.peso / somaPeso); });
+  }
+  (contratos || []).forEach((c) => {
+    if (c.status !== 'Assinado' || !noMes(c)) return;
+    distribui(c.plans, (parseFloat(c.finalM) || 0) + (parseFloat(c.finalP) || 0));
+  });
+  (spots || []).forEach((s) => {
+    if (s.status !== 'Aprovado' || !noMes(s)) return;
+    distribui(s.services, calcO(s.services || [], s.disc || 0).net);
+  });
+  const arr = Object.keys(cats).map((k) => ({ cat: k, val: cats[k] })).sort((a, b) => b.val - a.val);
+  const total = arr.reduce((a, b) => a + b.val, 0);
+  return { arr, total };
+}
+
+export default function RelatoriosTab({ relatorios, contratos, spots, catalog }) {
   const {
     ym, setYm, dataDia, setDataDia, registrosDoMes, registroDoDia, meta, vendidoNoMes,
     totaisDoMes, serieDiaria, taxasConversao, salvarDia, salvarMeta,
@@ -55,8 +91,27 @@ export default function RelatoriosTab({ relatorios }) {
   const [anoSel, mesSel] = ym.split('-').map(Number);
   const nomeMes = new Date(anoSel, mesSel - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 
+  const donut = useMemo(
+    () => receitaPorCategoria(contratos?.items, spots?.items, catalog?.services || [], ym),
+    [contratos?.items, spots?.items, catalog?.services, ym]
+  );
+
+  function mudarMesSel(novoMes, novoAno) {
+    setYm(`${novoAno}-${String(novoMes + 1).padStart(2, '0')}`);
+  }
+
   return (
     <div id="tab-relatorios" className="tab active">
+      <div className="ov-period-bar">
+        <span className="ov-period-lbl">Mês</span>
+        <select className="chart-sel" value={mesSel - 1} onChange={(e) => mudarMesSel(parseInt(e.target.value), anoSel)}>
+          {MESES_NOME.map((m, i) => <option key={m} value={i}>{m}</option>)}
+        </select>
+        <select className="chart-sel" value={anoSel} onChange={(e) => mudarMesSel(mesSel - 1, parseInt(e.target.value))}>
+          {[anoSel - 1, anoSel, anoSel + 1].map((a) => <option key={a} value={a}>{a}</option>)}
+        </select>
+      </div>
+
       <div className="kpi-grid">
         <div className="kpi">
           <div className="kpi-ic green"><svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg></div>
@@ -93,6 +148,14 @@ export default function RelatoriosTab({ relatorios }) {
         <TrendChart serie={serieDiaria} />
       </div>
 
+      <div className="card rel-donut-card" style={{ marginBottom: 18 }}>
+        <div className="rel-donut-head">
+          <h3 className="panel-title" style={{ margin: 0 }}>Receita por serviço</h3>
+          <span className="rel-donut-hint">De onde veio a renda em {nomeMes} (contratos assinados + SPOTs aprovados)</span>
+        </div>
+        <RevenuePieChart arr={donut.arr} total={donut.total} />
+      </div>
+
       <div className="rel-grid" style={{ marginBottom: 18 }}>
         <div className="chart-section">
           <div className="chart-header"><span className="sec-title">Funil Comercial do Mês</span></div>
@@ -102,8 +165,8 @@ export default function RelatoriosTab({ relatorios }) {
           <RelCalendar ym={ym} onYmChange={setYm} registros={registrosDoMes} dataDia={dataDia} onSelectDia={setDataDia} />
           <div className="rel-meta-card" style={{ marginTop: 14 }}>
             <h3>Meta do mês</h3>
-            <div className="field"><label>Meta (R$)</label><input type="number" value={metaForm.meta} onChange={(e) => setMetaForm((f) => ({ ...f, meta: e.target.value }))} /></div>
-            <div className="field"><label>Supermeta (R$)</label><input type="number" value={metaForm.supermeta} onChange={(e) => setMetaForm((f) => ({ ...f, supermeta: e.target.value }))} /></div>
+            <div className="field"><label>Meta</label><MoneyInput value={metaForm.meta} onChange={(v) => setMetaForm((f) => ({ ...f, meta: v }))} /></div>
+            <div className="field"><label>Supermeta</label><MoneyInput value={metaForm.supermeta} onChange={(v) => setMetaForm((f) => ({ ...f, supermeta: v }))} /></div>
             <button className="btn-p w100" onClick={salvarMetaAcao}>Salvar meta</button>
           </div>
         </div>
@@ -119,7 +182,7 @@ export default function RelatoriosTab({ relatorios }) {
             </div>
           ))}
         </div>
-        <div className="field"><label>Valor fechado no dia (R$)</label><input type="number" step="0.01" value={form.valor ?? ''} onChange={(e) => set('valor', e.target.value)} /></div>
+        <div className="field"><label>Valor fechado no dia</label><MoneyInput value={form.valor} onChange={(v) => set('valor', v)} /></div>
         <div className="field-row">
           <div className="field"><label>Objeções mais comuns</label><input value={form.objecoes ?? ''} onChange={(e) => set('objecoes', e.target.value)} /></div>
           <div className="field"><label>Leads quentes</label><input value={form.quentes ?? ''} onChange={(e) => set('quentes', e.target.value)} /></div>

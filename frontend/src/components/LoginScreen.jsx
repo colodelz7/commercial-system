@@ -18,7 +18,7 @@ export default function LoginScreen({ onLogin }) {
     <div id="screen-login" className="screen active">
       <div className="login-bg"><div className="orb o1"></div><div className="orb o2"></div></div>
       <form className="login-card" onSubmit={onSubmit}>
-        <div className="brand lg"><span className="bt">Colodel</span><span className="bd">.</span></div>
+        <div className="brand lg"><span className="bt">Morning</span><span className="bd">.</span></div>
         <p className="login-sub">Sistema Comercial Interno</p>
         <div className="field">
           <label>Usuário</label>
@@ -30,7 +30,7 @@ export default function LoginScreen({ onLogin }) {
         </div>
         <div className={`msg-err${erro ? '' : ' hidden'}`}>Usuário ou senha incorretos.</div>
         <button type="submit" className="btn-p w100" disabled={carregando}>{carregando ? 'Entrando...' : 'Entrar'}</button>
-        <p className="login-hint">Acesso somente à equipe Colodel.</p>
+        <p className="login-hint">Acesso somente à equipe Morning.</p>
       </form>
     </div>
   );

@@ -5,23 +5,21 @@ import { PDF, cor, fundo, linha, cabecalho, rodape, tituloSecao } from './pdfThe
 
 const ML = 18, PW = 210, PH = 297, TW = PW - ML * 2;
 
-export function gerarPdfOrcamento(o) {
+export function gerarPdfSpot(spot) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  let y = cabecalho(doc, CO, { kicker: 'PROPOSTA COMERCIAL' });
+  let y = cabecalho(doc, CO, { kicker: 'SPOT · PROPOSTA AVULSA' });
 
-  // Número da proposta + data, alinhados à direita do cabeçalho.
   doc.setFontSize(12).setFont(undefined, 'bold'); cor(doc, PDF.primary);
-  doc.text(`Nº ${fmtSeq(o.seq)}`, PW - ML, 16, { align: 'right' });
+  doc.text(`SPOT Nº ${fmtSeq(spot.seq)}`, PW - ML, 16, { align: 'right' });
   doc.setFontSize(8).setFont(undefined, 'normal'); cor(doc, PDF.gray);
-  doc.text(o.createdAt || '', PW - ML, 21, { align: 'right' });
+  doc.text(spot.createdAt || '', PW - ML, 21, { align: 'right' });
 
-  // Card com os dados do cliente.
   const camposCliente = [
-    ['CLIENTE / EMPRESA', o.clientName || '-'],
-    ...(o.clientDoc ? [['CPF / CNPJ', o.clientDoc]] : []),
-    ...(o.clientWpp ? [['WHATSAPP', o.clientWpp]] : []),
-    ...(o.clientEmail ? [['E-MAIL', o.clientEmail]] : []),
-    ['VALIDADE DA PROPOSTA', `${o.validity} dias`],
+    ['CLIENTE / EMPRESA', spot.clientName || '-'],
+    ...(spot.clientDoc ? [['CPF / CNPJ', spot.clientDoc]] : []),
+    ...(spot.clientWpp ? [['WHATSAPP', spot.clientWpp]] : []),
+    ...(spot.clientEmail ? [['E-MAIL', spot.clientEmail]] : []),
+    ...(spot.validity ? [['VALIDADE DA PROPOSTA', `${spot.validity} dias`]] : []),
   ];
   const linhasCliente = Math.ceil(camposCliente.length / 2);
   const boxH = linhasCliente * 11 + 6;
@@ -38,15 +36,12 @@ export function gerarPdfOrcamento(o) {
   });
   y += boxH + 10;
 
-  y = tituloSecao(doc, 'Serviços propostos', ML, y);
+  y = tituloSecao(doc, 'Serviços do SPOT', ML, y);
 
-  (o.services || []).forEach((s) => {
+  (spot.services || []).forEach((s) => {
     const qtd = qOf(s);
-    const descLines = doc.setFontSize(8.4).splitTextToSize(s.desc || '', TW - 12);
-    const incList = s.inc || [];
-    const incLines = incList.length ? doc.setFontSize(8).splitTextToSize(incList.map((i) => '• ' + i).join('   '), TW - 12) : [];
-    const cardH = 8 + descLines.length * 3.9 + (incLines.length ? incLines.length * 3.7 + 2 : 0) + 4;
-
+    const descLines = s.desc ? doc.setFontSize(8.4).splitTextToSize(s.desc, TW - 12) : [];
+    const cardH = 8 + descLines.length * 3.9 + 4;
     if (y + cardH > PH - 24) { doc.addPage(); y = 18; }
 
     fundo(doc, PDF.bg); linha(doc, PDF.border); doc.setLineWidth(0.25);
@@ -55,49 +50,42 @@ export function gerarPdfOrcamento(o) {
     doc.setFontSize(10.4).setFont(undefined, 'bold'); cor(doc, PDF.dark);
     doc.text(qtd > 1 ? `${s.name} (x${qtd})` : s.name, ML + 5, y + 6.5, { maxWidth: TW - 55 });
     doc.setFontSize(10.4).setFont(undefined, 'bold'); cor(doc, PDF.primary);
-    const precoTxt = qtd > 1 ? R(s.price * qtd) : R(s.price);
-    doc.text(precoTxt, PW - ML - 5, y + 6.5, { align: 'right' });
+    doc.text(qtd > 1 ? R(s.price * qtd) : R(s.price), PW - ML - 5, y + 6.5, { align: 'right' });
     doc.setFontSize(7.4).setFont(undefined, 'normal'); cor(doc, PDF.gray);
-    doc.text(s.bill === 'mensal' ? 'mensal' : 'pontual', PW - ML - 5, y + 10.5, { align: 'right' });
+    doc.text('pontual', PW - ML - 5, y + 10.5, { align: 'right' });
 
-    let ly = y + 11.5;
     if (descLines.length) {
       doc.setFontSize(8.4).setFont(undefined, 'normal'); cor(doc, PDF.gray);
-      doc.text(descLines, ML + 5, ly); ly += descLines.length * 3.9 + 1.5;
-    }
-    if (incLines.length) {
-      doc.setFontSize(8).setFont(undefined, 'normal'); cor(doc, PDF.green);
-      doc.text(incLines, ML + 5, ly);
+      doc.text(descLines, ML + 5, y + 11.5);
     }
     y += cardH + 4;
   });
 
   y += 3;
-  const { m, p, d, net } = calcO(o.services || [], o.disc || 0);
-  const resumoH = 10 + (m ? 6 : 0) + (p ? 6 : 0) + (o.disc ? 6 : 0) + 12;
+  const t = calcO(spot.services || [], spot.disc || 0);
+  const resumoH = 10 + 6 + (spot.disc ? 6 : 0) + 12;
   if (y + resumoH > PH - 24) { doc.addPage(); y = 18; }
   y = tituloSecao(doc, 'Resumo financeiro', ML, y);
 
   fundo(doc, PDF.bgStrong); doc.roundedRect(ML, y, TW, resumoH - 6, 2.5, 2.5, 'F');
   let ry = y + 7;
   doc.setFontSize(9.4).setFont(undefined, 'normal'); cor(doc, PDF.dark);
-  if (m) { doc.text('Total mensal', ML + 6, ry); doc.text(`${R(m)}/mês`, PW - ML - 6, ry, { align: 'right' }); ry += 6; }
-  if (p) { doc.text('Total pontual', ML + 6, ry); doc.text(R(p), PW - ML - 6, ry, { align: 'right' }); ry += 6; }
-  if (o.disc) { cor(doc, PDF.red); doc.text(`Desconto (${o.disc}%)`, ML + 6, ry); doc.text(`- ${R(d)}`, PW - ML - 6, ry, { align: 'right' }); cor(doc, PDF.dark); ry += 6; }
+  doc.text('Total pontual', ML + 6, ry); doc.text(R(t.p), PW - ML - 6, ry, { align: 'right' }); ry += 6;
+  if (spot.disc) { cor(doc, PDF.red); doc.text(`Desconto (${spot.disc}%)`, ML + 6, ry); doc.text(`- ${R(t.d)}`, PW - ML - 6, ry, { align: 'right' }); cor(doc, PDF.dark); ry += 6; }
   linha(doc, PDF.primary); doc.setLineWidth(0.3); doc.line(ML + 6, ry, PW - ML - 6, ry); ry += 6.5;
   doc.setFontSize(13).setFont(undefined, 'bold'); cor(doc, PDF.primary);
-  doc.text('Valor final', ML + 6, ry); doc.text(R(net), PW - ML - 6, ry, { align: 'right' });
+  doc.text('Valor final', ML + 6, ry); doc.text(R(t.net), PW - ML - 6, ry, { align: 'right' });
   y += resumoH + 4;
 
-  if (o.finObs) {
+  if (spot.finObs) {
     if (y > PH - 40) { doc.addPage(); y = 18; }
     doc.setFontSize(8.6).setFont(undefined, 'bold'); cor(doc, PDF.gray);
     doc.text('OBSERVAÇÕES', ML, y); y += 4.5;
     doc.setFont(undefined, 'normal').setFontSize(9); cor(doc, PDF.dark);
-    const obsLines = doc.splitTextToSize(o.finObs, TW);
+    const obsLines = doc.splitTextToSize(spot.finObs, TW);
     doc.text(obsLines, ML, y); y += obsLines.length * 4.4;
   }
 
   rodape(doc, CO, { pageW: PW, pageH: PH, margin: ML });
-  doc.save(`Orcamento_${fmtSeq(o.seq)}_${(o.clientName || 'cliente').replace(/[^\w-]+/g, '_')}.pdf`);
+  doc.save(`SPOT_${fmtSeq(spot.seq)}_${(spot.clientName || 'cliente').replace(/[^\w-]+/g, '_')}.pdf`);
 }

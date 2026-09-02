@@ -3,7 +3,7 @@ import { DB } from '../lib/db';
 import { BASE_SERVICES, SERVICES_VERSION } from '../lib/constants';
 import { gid } from '../lib/format';
 
-const VERSION_KEY = 'colodel_servicos_versao';
+const VERSION_KEY = 'morning_servicos_versao';
 
 function computar() {
   const doBanco = DB.getServicos() || [];

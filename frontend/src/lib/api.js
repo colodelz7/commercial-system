@@ -1,4 +1,5 @@
-export const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3003';
+// Vazio = caminho relativo, passa pelo proxy do Vite (/autentique -> backend local).
+export const API_BASE = import.meta.env.VITE_API_BASE || '';
 
 export async function enviarParaAutentique(contrato, signatario, pdfBase64) {
   const resp = await fetch(`${API_BASE}/autentique/criar-documento`, {

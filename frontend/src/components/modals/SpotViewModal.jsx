@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { R, calcO } from '../../lib/format';
 import { LOSS_REASONS } from '../../lib/constants';
+import { gerarPdfSpot } from '../../lib/pdfSpot';
 
 function HistList({ history }) {
   if (!history || !history.length) return <p style={{ color: 'var(--g3)', fontSize: '.85rem', padding: '12px 0' }}>Nenhum histórico ainda.</p>;
@@ -110,6 +111,7 @@ export default function SpotViewModal({ spot, onClose, onMudarStatus, onEditar, 
 
         <div className="modal-acts">
           <button className="btn-g" onClick={onClose}>Fechar</button>
+          <button className="btn-s" onClick={() => gerarPdfSpot(spot)}>📄 PDF SPOT</button>
           <button className="btn-s" onClick={() => onEditar(spot.id)}>✏️ Editar</button>
           <button className="btn-g" onClick={() => onExcluir(spot.id)}>🗑 Excluir</button>
         </div>

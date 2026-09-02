@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { mPhone } from '../../lib/format';
 import { ORIGENS } from '../../lib/constants';
 import { LEAD_STAGES } from '../../hooks/useLeads';
+import MoneyInput from '../MoneyInput';
 
 const VAZIO = { name: '', empresa: '', wpp: '', email: '', valor: '', obs: '', temp: 'Fria', origem: '', stage: 'leads' };
 
@@ -35,7 +36,7 @@ export default function LeadModal({ open, editando, onClose, onSave, onDelete })
           <div className="field"><label>E-mail</label><input value={form.email} onChange={(e) => set('email', e.target.value)} /></div>
         </div>
         <div className="field-row">
-          <div className="field"><label>Valor estimado (R$)</label><input type="number" step="0.01" value={form.valor} onChange={(e) => set('valor', e.target.value)} /></div>
+          <div className="field"><label>Valor estimado</label><MoneyInput value={form.valor} onChange={(v) => set('valor', v)} /></div>
           <div className="field">
             <label>Temperatura</label>
             <select value={form.temp} onChange={(e) => set('temp', e.target.value)}>

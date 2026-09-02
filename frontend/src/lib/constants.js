@@ -1,15 +1,15 @@
 /* Dados fixos do sistema: empresa, catálogo base de serviços, listas comerciais */
 
 export const CO = {
-  name: 'COLODEL LTDA', cnpj: '00.000.000/0001-00',
+  name: 'MORNING LTDA', cnpj: '00.000.000/0001-00',
   address: 'Rua Exemplo, nº 100 - Sua Cidade - PR',
   resp: 'Nome do Responsável', cpf: '000.000.000-00',
-  email: 'contato@colodel.com.br',
-  emailComercial: 'comercial@colodel.com.br',
-  instagram: '@colodel',
+  email: 'contato@morning.com.br',
+  emailComercial: 'comercial@morning.com.br',
+  instagram: '@morning',
   whatsapp: '(00) 00000-0000',
-  site: 'colodel.com.br',
-  pix: 'CNPJ 00.000.000/0001-00 - COLODEL LTDA',
+  site: 'morning.com.br',
+  pix: 'CNPJ 00.000.000/0001-00 - MORNING LTDA',
   bank: 'Banco', foro: 'SUA CIDADE/PR',
 };
 

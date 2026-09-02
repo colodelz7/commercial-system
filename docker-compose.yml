@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: comercial-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?defina POSTGRES_USER no .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+      POSTGRES_DB: ${POSTGRES_DB:?defina POSTGRES_DB no .env}
+    ports:
+      - "5432:5432"
+    volumes:
+      - comercial_pgdata:/var/lib/postgresql/data
+
+volumes:
+  comercial_pgdata:

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { R, calcO, qOf, mDoc, mPhone, discToPct, isValidEmail, isValidPhone, validaDoc } from '../lib/format';
 import { ORIGENS, RESPONSAVEIS } from '../lib/constants';
 import { useApiLookup } from '../hooks/useApiLookup';
+import MoneyInput from './MoneyInput';
 
 const PAY_OPCOES = ['Mensal - todo dia 05', 'Mensal - todo dia 10', 'Mensal - todo dia 15', 'Mensal - todo dia 20', 'Mensal - todo dia 25', 'À vista no ato da assinatura'];
 
@@ -61,6 +62,14 @@ export default function OrcamentoWizard({ orc: orcInicial, catalog, clientesList
   const totais = useMemo(() => calcO(orc.services, discPct), [orc.services, discPct]);
 
   function onDiscBlur() {
+    // O que foi digitado, sem o teto de 20% — só pra saber se precisa corrigir o texto.
+    const pctDigitado = discToPct(discInput, discMode, bruto, 999999);
+    if (pctDigitado > 20) {
+      alert('O desconto máximo permitido é 20%. Ajustei o valor para 20%.');
+      if (discMode === 'brl') setDiscInput(String(Math.round(bruto * 20 / 100 * 100) / 100).replace('.', ','));
+      else setDiscInput('20');
+      return;
+    }
     if (discPct > 10) {
       const ok = confirm(`O desconto informado é de ${String(discPct).replace('.', ',')}%, acima dos 10% recomendados.\n\nConfirmar mesmo assim?`);
       if (!ok) {
@@ -170,8 +179,7 @@ export default function OrcamentoWizard({ orc: orcInicial, catalog, clientesList
                   <div className="sitem" key={i}>
                     <div className="si-head"><span className="si-name">{s.name}</span><button className="btn-d" onClick={() => removerServico(i)}>✕</button></div>
                     <div className="si-pr">
-                      <label>R$</label>
-                      <input type="number" min="0" step="0.01" value={s.price} onChange={(e) => atualizarServico(i, { price: parseFloat(e.target.value) || 0 })} />
+                      <MoneyInput value={s.price} onChange={(v) => atualizarServico(i, { price: v })} />
                       <label style={{ marginLeft: 4 }}>Qtd</label>
                       <input type="number" min="1" step="1" style={{ width: 48 }} value={s.qtd || 1} onChange={(e) => atualizarServico(i, { qtd: Math.max(1, parseInt(e.target.value) || 1) })} />
                       <select className="cbill-sel" value={s.bill} onChange={(e) => atualizarServico(i, { bill: e.target.value })}>

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { R, mPhone, discToPct, isValidEmail, isValidPhone } from '../lib/format';
 import { RESPONSAVEIS } from '../lib/constants';
 import { durLabel, payMethodsLabel } from '../lib/contractDocument';
+import MoneyInput from './MoneyInput';
 
 const PAY_OPCOES = ['PIX', 'Boleto bancário', 'Cartão de crédito', 'Cartão de débito', 'Dinheiro'];
 
@@ -62,6 +63,15 @@ export default function ContratoWizard({ ct: ctInicial, catalog, onGerarLink }) 
   const bruto = (parseFloat(finalM) || 0) + (parseFloat(finalP) || 0);
   const discPct = discToPct(discInput, discMode, bruto);
   const dVal = bruto * (discPct / 100);
+
+  function onDiscBlur() {
+    const pctDigitado = discToPct(discInput, discMode, bruto, 999999);
+    if (pctDigitado > 20) {
+      alert('O desconto máximo permitido é 20%. Ajustei o valor para 20%.');
+      if (discMode === 'brl') setDiscInput(String(Math.round(bruto * 20 / 100 * 100) / 100).replace('.', ','));
+      else setDiscInput('20');
+    }
+  }
 
   function step2Next() {
     setCt((c) => ({
@@ -135,8 +145,7 @@ export default function ContratoWizard({ ct: ctInicial, catalog, onGerarLink }) 
                   <div className="sitem" key={i}>
                     <div className="si-head"><span className="si-name">{p.name}</span><button className="btn-d" onClick={() => removerPlano(i)}>✕</button></div>
                     <div className="si-pr">
-                      <label>R$</label>
-                      <input type="number" min="0" step="0.01" value={p.price} onChange={(e) => atualizarPlano(i, { price: parseFloat(e.target.value) || 0 })} />
+                      <MoneyInput value={p.price} onChange={(v) => atualizarPlano(i, { price: v })} />
                       <select className="cbill-sel" value={p.bill} onChange={(e) => atualizarPlano(i, { bill: e.target.value })}>
                         <option value="mensal">Mensal</option>
                         <option value="pontual">Pontual</option>
@@ -160,8 +169,8 @@ export default function ContratoWizard({ ct: ctInicial, catalog, onGerarLink }) 
           <div className="card">
             <h2 className="ctitle">Condições do Contrato</h2>
             <div className="fgrid">
-              <div className="field"><label>Valor mensal final (R$)</label><input type="number" step="0.01" value={finalM} onChange={(e) => setFinalM(e.target.value)} placeholder="0,00" /></div>
-              <div className="field"><label>Valor pontual final (R$)</label><input type="number" step="0.01" value={finalP} onChange={(e) => setFinalP(e.target.value)} placeholder="0,00" /></div>
+              <div className="field"><label>Valor mensal final</label><MoneyInput value={finalM} onChange={(v) => setFinalM(String(v))} /></div>
+              <div className="field"><label>Valor pontual final</label><MoneyInput value={finalP} onChange={(v) => setFinalP(String(v))} /></div>
               <div className="field"><label>Obs. sobre valor (combo, desconto)</label><input value={ct.discObs} onChange={(e) => set('discObs', e.target.value)} placeholder="Ex: desconto combo - de R$ 1.290 por R$ 1.190" /></div>
               <div className="field">
                 <label>Desconto</label>
@@ -170,7 +179,7 @@ export default function ContratoWizard({ ct: ctInicial, catalog, onGerarLink }) 
                     <button type="button" className={`dt-btn${discMode === 'pct' ? ' active' : ''}`} onClick={() => setDiscMode('pct')}>%</button>
                     <button type="button" className={`dt-btn${discMode === 'brl' ? ' active' : ''}`} onClick={() => setDiscMode('brl')}>R$</button>
                   </div>
-                  <input value={discInput} onChange={(e) => setDiscInput(e.target.value)} placeholder={discMode === 'pct' ? '% (máx. 20%)' : 'R$ de desconto'} />
+                  <input value={discInput} onChange={(e) => setDiscInput(e.target.value)} onBlur={onDiscBlur} placeholder={discMode === 'pct' ? '% (máx. 20%)' : 'R$ de desconto'} />
                 </div>
               </div>
               <div className="field">

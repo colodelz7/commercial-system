@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { DB } from '../lib/db';
 import { mDoc, mCEP, mPhone, isValidEmail, isValidCPF, validaDoc, isValidPhone, addHist } from '../lib/format';
 import { useApiLookup } from '../hooks/useApiLookup';
 import { renderContractHTML, durLabel } from '../lib/contractDocument';
@@ -8,8 +7,27 @@ import { enviarParaAutentique } from '../lib/api';
 
 const CAMPOS_VAZIOS = { cnpj: '', fantasia: '', razao: '', email: '', rua: '', comp: '', bairro: '', cidade: '', cep: '', resp: '', cpf: '', wpp: '' };
 
+async function buscarContratoPorToken(token) {
+  const resp = await fetch(`/api/contrato-link/${encodeURIComponent(token)}`);
+  if (!resp.ok) return null;
+  return resp.json();
+}
+async function salvarContratoCliente(token, patch) {
+  const resp = await fetch(`/api/contrato-link/${encodeURIComponent(token)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  if (!resp.ok) {
+    const d = await resp.json().catch(() => ({}));
+    throw new Error(d.error || `Erro ${resp.status} ao salvar.`);
+  }
+  return resp.json();
+}
+
 export default function ClientSignPage({ token }) {
-  const [contrato, setContrato] = useState(() => DB.getContratoPorLink(token));
+  const [carregando, setCarregando] = useState(true);
+  const [contrato, setContrato] = useState(null);
   const [step, setStep] = useState(1);
   const [form, setForm] = useState(CAMPOS_VAZIOS);
   const [erro, setErro] = useState('');
@@ -17,15 +35,25 @@ export default function ClientSignPage({ token }) {
   const { status, buscarCEP, buscarCNPJ } = useApiLookup();
 
   useEffect(() => {
-    if (contrato) addHist(contrato, 'Cliente acessou o link', '👁️');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    let ativo = true;
+    buscarContratoPorToken(token).then((c) => {
+      if (!ativo) return;
+      setContrato(c);
+      setCarregando(false);
+      if (c) addHist(c, 'Cliente acessou o link', '👁️');
+    });
+    return () => { ativo = false; };
+  }, [token]);
+
+  if (carregando) {
+    return <div className="client-screen client-invalid"><p>Carregando...</p></div>;
+  }
 
   if (!contrato) {
     return (
       <div className="client-screen client-invalid">
-        <div className="client-invalid-logo">Colodel</div>
-        <p>Link inválido ou expirado. Entre em contato com a equipe Colodel.</p>
+        <div className="client-invalid-logo">Morning</div>
+        <p>Link inválido ou expirado. Entre em contato com a equipe Morning.</p>
       </div>
     );
   }
@@ -50,7 +78,7 @@ export default function ClientSignPage({ token }) {
     setForm((f) => ({ ...f, rua: f.rua || r.rua, bairro: f.bairro || r.bairro, cidade: r.cidade || f.cidade }));
   }
 
-  function formNext() {
+  async function formNext() {
     const obrigatorios = [['cnpj', 'CNPJ/CPF'], ['fantasia', 'Nome / Empresa'], ['email', 'E-mail'], ['rua', 'Endereço'], ['bairro', 'Bairro'], ['cidade', 'Município/UF'], ['cep', 'CEP'], ['resp', 'Nome do Responsável'], ['wpp', 'WhatsApp']];
     const faltando = obrigatorios.filter(([id]) => !form[id].trim());
     if (faltando.length) return setErro('Obrigatórios: ' + faltando.map((x) => x[1]).join(', '));
@@ -62,33 +90,36 @@ export default function ClientSignPage({ token }) {
 
     setErro('');
     const clientData = { ...form, razao: form.razao || form.fantasia };
-    const atualizado = { ...contrato, clientData, status: 'Aguardando assinatura' };
-    addHist(atualizado, 'Cliente preencheu os dados do formulário', '📋');
-    DB.saveContrato(atualizado);
-    setContrato(atualizado);
-    setStep(2);
+    const historyNovo = [{ action: 'Cliente preencheu os dados do formulário', icon: '📋', time: new Date().toLocaleString('pt-BR') }];
+    try {
+      const salvo = await salvarContratoCliente(token, { clientData, status: 'Aguardando assinatura', history: historyNovo });
+      setContrato({ ...salvo, _servicosCatalogo: contrato._servicosCatalogo });
+      setStep(2);
+    } catch (e) {
+      setErro(e.message);
+    }
   }
 
   async function assinar() {
     setEnviando(true);
     try {
       const cd = contrato.clientData;
-      await gerarPdfContrato(contrato, cd, DB.getServicos());
+      await gerarPdfContrato(contrato, cd, contrato._servicosCatalogo || []);
       const resultado = await enviarParaAutentique(contrato, { name: cd.resp, email: cd.email }, null);
-      const atualizado = { ...contrato, autentiqueId: resultado.documentId || resultado.id || null };
-      addHist(atualizado, 'Documento enviado para assinatura na Autentique', '✍️');
-      DB.saveContrato(atualizado);
-      setContrato(atualizado);
+      const autentiqueId = resultado.documentId || resultado.id || null;
+      const historyNovo = [{ action: 'Documento enviado para assinatura na Autentique', icon: '✍️', time: new Date().toLocaleString('pt-BR') }];
+      const salvo = await salvarContratoCliente(token, { autentiqueId, history: historyNovo });
+      setContrato({ ...salvo, _servicosCatalogo: contrato._servicosCatalogo });
       setStep(4);
     } catch (e) {
-      alert('Não foi possível enviar para assinatura agora: ' + e.message + '\n\nVocê já pode baixar o PDF do contrato e assinar por fora, entrando em contato com a equipe Colodel.');
+      alert('Não foi possível enviar para assinatura agora: ' + e.message + '\n\nVocê já pode baixar o PDF do contrato e assinar por fora, entrando em contato com a equipe Morning.');
     } finally {
       setEnviando(false);
     }
   }
 
   const cd = contrato.clientData || {};
-  const html = step >= 3 ? renderContractHTML(contrato, cd, DB.getServicos()) : '';
+  const html = step >= 3 ? renderContractHTML(contrato, cd, contrato._servicosCatalogo || []) : '';
 
   return (
     <div className="client-screen">

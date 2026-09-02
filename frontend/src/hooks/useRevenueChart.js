@@ -28,6 +28,7 @@ export function useRevenueChart(contratos, spots, calcO) {
         for (let d = d1; d <= d2; d++) buckets.push({ day: d, label: String(d), m: 0, p: 0, ano: start.getFullYear(), mes: start.getMonth() });
         contratos.forEach((c) => {
           if (!c.finalM && !c.finalP) return;
+          if (c.status !== 'Assinado') return;
           const dt = dtOf(c); if (!dt) return;
           const idx = dt.getDate() - d1; if (idx >= 0 && idx < buckets.length) { buckets[idx].m += parseFloat(c.finalM) || 0; buckets[idx].p += parseFloat(c.finalP) || 0; }
         });
@@ -47,6 +48,7 @@ export function useRevenueChart(contratos, spots, calcO) {
       while (cur <= last) { months.push({ month: cur.getMonth(), year: cur.getFullYear(), m: 0, p: 0 }); cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1); }
       contratos.forEach((c) => {
         if (!c.finalM && !c.finalP) return;
+        if (c.status !== 'Assinado') return;
         const dt = dtOf(c); if (!dt) return;
         const mo = months.find((x) => x.month === dt.getMonth() && x.year === dt.getFullYear());
         if (mo) { mo.m += parseFloat(c.finalM) || 0; mo.p += parseFloat(c.finalP) || 0; }
@@ -67,6 +69,7 @@ export function useRevenueChart(contratos, spots, calcO) {
       const days = Array.from({ length: daysInMonth }, (_, i) => ({ day: i + 1, label: String(i + 1), m: 0, p: 0, ano: chartYear, mes: chartMonth }));
       contratos.forEach((c) => {
         if (!c.finalM && !c.finalP) return;
+        if (c.status !== 'Assinado') return;
         const dt = dataEfetiva(c);
         if (!dt || dt.getMonth() !== chartMonth || dt.getFullYear() !== chartYear) return;
         days[dt.getDate() - 1].m += parseFloat(c.finalM) || 0;
@@ -94,6 +97,7 @@ export function useRevenueChart(contratos, spots, calcO) {
     }
     contratos.forEach((c) => {
       if (!c.finalM && !c.finalP) return;
+      if (c.status !== 'Assinado') return;
       const dt = dataEfetiva(c); if (!dt) return;
       const mo = months.find((x) => x.month === dt.getMonth() && x.year === dt.getFullYear());
       if (mo) { mo.m += parseFloat(c.finalM) || 0; mo.p += parseFloat(c.finalP) || 0; }
@@ -112,6 +116,7 @@ export function useRevenueChart(contratos, spots, calcO) {
     const bate = (item) => { const dt = dataEfetiva(item); return dt && dt.getFullYear() === ano && dt.getMonth() === mes && dt.getDate() === dia; };
     const itens = [];
     contratos.forEach((c) => {
+      if (c.status !== 'Assinado') return;
       const m = parseFloat(c.finalM) || 0, p = parseFloat(c.finalP) || 0;
       if ((m + p) > 0 && bate(c)) itens.push({ tipo: 'ct', id: c.id, nome: c.clientName, status: c.status, m, p, v: m + p });
     });

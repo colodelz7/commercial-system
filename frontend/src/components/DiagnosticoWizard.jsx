@@ -1,10 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { isValidPhone } from '../lib/format';
 import { ORIGENS, RESPONSAVEIS } from '../lib/constants';
+import { DB } from '../lib/db';
+
+function tamanhoKB(bytes) { return Math.max(1, Math.round((bytes || 0) / 1024)) + ' KB'; }
 
 export default function DiagnosticoWizard({ diag: diagInicial, onSalvar, onExcluir, onNovo, onConverterOrcamento }) {
   const [step, setStep] = useState(1);
   const [d, setD] = useState(diagInicial);
+  const [enviandoAnexo, setEnviandoAnexo] = useState(false);
+  const [erroAnexo, setErroAnexo] = useState('');
   const timerRef = useRef(null);
   const idAtualRef = useRef(diagInicial.id);
 
@@ -29,6 +34,28 @@ export default function DiagnosticoWizard({ diag: diagInicial, onSalvar, onExclu
   function step1Next() {
     if (d.wpp && !isValidPhone(d.wpp)) return alert('Telefone inválido. Use DDD + número (ex: (41) 99999-9999).');
     setStep(2);
+  }
+
+  async function onAnexarArquivo(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!d.empresa || !d.empresa.trim()) { setErroAnexo('Informe ao menos a Empresa (etapa 1) antes de anexar arquivos.'); return; }
+    setErroAnexo(''); setEnviandoAnexo(true);
+    try {
+      const meta = await DB.uploadAnexo(d.id, file);
+      set('anexos', [...(d.anexos || []), meta]);
+    } catch (err) {
+      setErroAnexo(err.message || 'Erro ao enviar o arquivo.');
+    } finally {
+      setEnviandoAnexo(false);
+    }
+  }
+
+  async function onRemoverAnexo(anexo) {
+    if (!confirm(`Remover o anexo "${anexo.nome}"?`)) return;
+    await DB.deleteAnexo(anexo.path);
+    set('anexos', (d.anexos || []).filter((a) => a.path !== anexo.path));
   }
 
   function gerarPdf() {
@@ -114,6 +141,23 @@ export default function DiagnosticoWizard({ diag: diagInicial, onSalvar, onExclu
             <div className="dg2-grid">
               <div className="field"><label>Seu contato</label><textarea className="dg-ta" value={d.f_contato} onChange={(e) => set('f_contato', e.target.value)} placeholder="Nome, WhatsApp, e-mail..." /></div>
               <div className="field"><label>Chamada para ação (CTA final)</label><textarea className="dg-ta" value={d.f_cta} onChange={(e) => set('f_cta', e.target.value)} placeholder="Ex: Vamos tornar sua demanda previsível." /></div>
+            </div>
+
+            <div className="dg-sub">Anexos</div>
+            <div className="anexos-box">
+              <input type="file" onChange={onAnexarArquivo} disabled={enviandoAnexo} />
+              {enviandoAnexo && <p className="hint-txt">Enviando...</p>}
+              {erroAnexo && <div className="msg-err">{erroAnexo}</div>}
+              <div className="anexos-lista">
+                {(d.anexos || []).map((a) => (
+                  <div className="anexo-item" key={a.path}>
+                    <a href={DB.getAnexoUrl(a.path)} target="_blank" rel="noreferrer">📎 {a.nome}</a>
+                    <span className="anx-meta">{tamanhoKB(a.tamanho)}</span>
+                    <button type="button" className="btn-g" onClick={() => onRemoverAnexo(a)}>🗑</button>
+                  </div>
+                ))}
+                {(!d.anexos || !d.anexos.length) && <p className="hint-txt">Nenhum anexo ainda.</p>}
+              </div>
             </div>
 
             <div className="diag-actions-bar">
