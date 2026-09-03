@@ -50,7 +50,7 @@ export default function LeadModal({ open, editando, onClose, onSave, onDelete })
           <div className="field">
             <label>Origem</label>
             <select value={form.origem} onChange={(e) => set('origem', e.target.value)}>
-              <option value="">—</option>
+              <option value="">Sem origem</option>
               {ORIGENS.map((o) => <option key={o} value={o}>{o}</option>)}
             </select>
           </div>

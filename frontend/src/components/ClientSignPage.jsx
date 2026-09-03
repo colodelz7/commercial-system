@@ -104,8 +104,9 @@ export default function ClientSignPage({ token }) {
     setEnviando(true);
     try {
       const cd = contrato.clientData;
-      await gerarPdfContrato(contrato, cd, contrato._servicosCatalogo || []);
-      const resultado = await enviarParaAutentique(contrato, { name: cd.resp, email: cd.email }, null);
+      // Gera o PDF do contrato e manda o próprio arquivo para a assinatura.
+      const pdfBase64 = await gerarPdfContrato(contrato, cd, contrato._servicosCatalogo || [], { retornarBase64: true });
+      const resultado = await enviarParaAutentique(contrato, pdfBase64);
       const autentiqueId = resultado.documentId || resultado.id || null;
       const historyNovo = [{ action: 'Documento enviado para assinatura na Autentique', icon: '✍️', time: new Date().toLocaleString('pt-BR') }];
       const salvo = await salvarContratoCliente(token, { autentiqueId, history: historyNovo });
@@ -163,8 +164,8 @@ export default function ClientSignPage({ token }) {
           <p><strong>{cd.fantasia}</strong></p>
           <p>CNPJ/CPF: {cd.cnpj}</p>
           <p>E-mail: {cd.email}</p>
-          <p>Endereço: {cd.rua}{cd.comp ? `, ${cd.comp}` : ''} — {cd.bairro}, {cd.cidade} — {cd.cep}</p>
-          <p>Responsável: {cd.resp} {cd.cpf ? `— CPF ${cd.cpf}` : ''}</p>
+          <p>Endereço: {cd.rua}{cd.comp ? `, ${cd.comp}` : ''}, {cd.bairro}, {cd.cidade}, CEP {cd.cep}</p>
+          <p>Responsável: {cd.resp} {cd.cpf ? `· CPF ${cd.cpf}` : ''}</p>
           <p>WhatsApp: {cd.wpp}</p>
           <p>Duração do contrato: {durLabel(contrato.duration)}</p>
           <div className="wizard-actions">

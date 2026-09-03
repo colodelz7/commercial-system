@@ -24,7 +24,7 @@ export default function UsuariosTab({ sessao }) {
   async function onDelete(id) {
     const u = items.find((x) => x.id === id);
     if (!u) return;
-    if (!confirm(`Excluir o usuário "${u.nome}" (@${u.usuario})?\n\nIsso não pode ser desfeito. Se a pessoa só saiu da equipe, prefira EDITAR e marcar como Inativo — assim o histórico dela continua fazendo sentido.`)) return;
+    if (!confirm(`Excluir o usuário "${u.nome}" (@${u.usuario})?\n\nIsso não pode ser desfeito. Se a pessoa só saiu da equipe, prefira EDITAR e marcar como Inativo, assim o histórico dela continua fazendo sentido.`)) return;
     try { await excluir(id); setModalOpen(false); }
     catch (e) { alert(e.message || 'Não consegui excluir.'); }
   }

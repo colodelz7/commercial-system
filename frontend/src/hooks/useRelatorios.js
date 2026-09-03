@@ -20,11 +20,34 @@ function ymOf(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padSt
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 function metaIdOf(ym) { return 'meta-' + ym; }
 
+/** Lista de 'AAAA-MM' dos últimos N meses, terminando no mês de referência. */
+function mesesAte(ym, n) {
+  const [ano, mes] = ym.split('-').map(Number);
+  const lista = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(ano, mes - 1 - i, 1);
+    lista.push(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'));
+  }
+  return lista;
+}
+
 export function useRelatorios() {
   const [ym, setYm] = useState(ymOf(new Date()));
   const [dataDia, setDataDia] = useState(todayISO());
+  // Quantos meses o painel considera: 1 (só o mês), 3, 6 ou 12.
+  const [faixa, setFaixa] = useState(1);
   const [, forceTick] = useState(0);
   const recarregar = useCallback(() => forceTick((n) => n + 1), []);
+
+  const mesesDaFaixa = useMemo(() => mesesAte(ym, faixa), [ym, faixa]);
+
+  // Registros da faixa escolhida (o mês selecionado e, se for o caso, os
+  // anteriores). O checklist do dia continua sempre no mês selecionado.
+  const registrosDaFaixa = useMemo(() => {
+    const alvo = new Set(mesesDaFaixa);
+    return DB.getRelatorios().filter((r) => r.id && r.id.length === 10 && alvo.has(r.id.slice(0, 7)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mesesDaFaixa]);
 
   const registrosDoMes = useMemo(() => {
     return DB.getRelatorios().filter((r) => r.id && r.id.length === 10 && r.id.indexOf(ym) === 0);
@@ -36,7 +59,22 @@ export function useRelatorios() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dataDia]);
 
+  // A meta acompanha a faixa: em 3/6/12 meses, soma as metas de cada mês.
   const meta = useMemo(() => {
+    const todos = DB.getRelatorios();
+    let metaSoma = 0, superSoma = 0;
+    mesesDaFaixa.forEach((m) => {
+      const rec = todos.find((r) => r.id === metaIdOf(m));
+      metaSoma += rec?.meta || 0;
+      superSoma += rec?.supermeta || 0;
+    });
+    return { meta: metaSoma, supermeta: superSoma };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mesesDaFaixa]);
+
+  /* Meta só do mês selecionado. O card de edição usa esta, não a soma da
+     faixa, senão salvar em "3 meses" gravaria o total como meta de um mês. */
+  const metaDoMes = useMemo(() => {
     const rec = DB.getRelatorios().find((r) => r.id === metaIdOf(ym));
     return { meta: rec?.meta || 0, supermeta: rec?.supermeta || 0 };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -44,17 +82,37 @@ export function useRelatorios() {
 
   const vendidoNoMes = useMemo(() => {
     let total = 0, n = 0;
-    registrosDoMes.forEach((r) => { if (r.valor > 0) { total += r.valor; n++; } });
+    registrosDaFaixa.forEach((r) => { if (r.valor > 0) { total += r.valor; n++; } });
     return { total, n };
-  }, [registrosDoMes]);
+  }, [registrosDaFaixa]);
 
-  // Totais de cada métrica somados no mês (usado no funil e nos cards)
+  // Totais de cada métrica somados na faixa (usado no funil e nos cards)
   const totaisDoMes = useMemo(() => {
     const t = {};
     REL_NUM.forEach(([campo]) => { t[campo] = 0; });
-    registrosDoMes.forEach((r) => { REL_NUM.forEach(([campo]) => { t[campo] += parseFloat(r[campo]) || 0; }); });
+    registrosDaFaixa.forEach((r) => { REL_NUM.forEach(([campo]) => { t[campo] += parseFloat(r[campo]) || 0; }); });
     return t;
-  }, [registrosDoMes]);
+  }, [registrosDaFaixa]);
+
+  /** Série por mês (para a faixa de 3, 6 ou 12 meses). */
+  const serieMensal = useMemo(() => {
+    const porMes = {};
+    registrosDaFaixa.forEach((r) => {
+      const m = r.id.slice(0, 7);
+      porMes[m] = porMes[m] || { valor: 0, fechados: 0 };
+      porMes[m].valor += r.valor || 0;
+      porMes[m].fechados += parseFloat(r.fechados) || 0;
+    });
+    return mesesDaFaixa.map((m) => {
+      const [a, mm] = m.split('-').map(Number);
+      return {
+        ym: m,
+        label: new Date(a, mm - 1, 1).toLocaleDateString('pt-BR', { month: 'short' }).replace('.', ''),
+        valor: porMes[m] ? porMes[m].valor : 0,
+        fechados: porMes[m] ? porMes[m].fechados : 0,
+      };
+    });
+  }, [registrosDaFaixa, mesesDaFaixa]);
 
   // Série diária de valor fechado, pra gráfico de tendência do mês
   const serieDiaria = useMemo(() => {
@@ -95,5 +153,6 @@ export function useRelatorios() {
   return {
     ym, setYm, dataDia, setDataDia, registrosDoMes, registroDoDia, meta, vendidoNoMes,
     totaisDoMes, serieDiaria, taxasConversao, salvarDia, salvarMeta,
+    faixa, setFaixa, mesesDaFaixa, serieMensal, metaDoMes,
   };
 }

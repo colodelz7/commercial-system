@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { gerarPdfOrcamento } from '../lib/pdf';
 import { gerarPdfSpot } from '../lib/pdfSpot';
 import { gerarPdfDiagnostico } from '../lib/pdfDiagnostico';
-import { newClientToken, addHist, now, gid } from '../lib/format';
+import { addHist, now, gid } from '../lib/format';
+import { gerarLinkAssinatura } from '../lib/api';
 import { DB } from '../lib/db';
 import { useCatalog } from '../hooks/useCatalog';
 import { useEntity } from '../hooks/useEntity';
@@ -33,13 +34,14 @@ import LeadFunilTab from './tabs/LeadFunilTab';
 import RelatoriosTab from './tabs/RelatoriosTab';
 import ProspeccaoTab from './tabs/ProspeccaoTab';
 import UsuariosTab from './tabs/UsuariosTab';
+import HistoricoTab from './tabs/HistoricoTab';
 import FloatingChatButton from './FloatingChatButton';
 
 const DASH_TITLES = {
   overview: 'Visão Geral', orcamentos: 'Orçamentos', contratos: 'Contratos', spots: 'SPOT',
   diagnostico: 'Diagnóstico', funil: 'Funil Comercial', servicos: 'Serviços', clientes: 'Clientes',
   leadfunil: 'Funil de Leads', relatorios: 'Relatórios',
-  prospeccao: 'Buscador', usuarios: 'Usuários',
+  prospeccao: 'Buscador', usuarios: 'Usuários', historico: 'Histórico',
 };
 
 // Monta só depois que a sessão E o cache do db.js já estão prontos (ver useAuth),
@@ -120,30 +122,40 @@ export default function Dashboard({ sessao, onToggleTheme, onLogout }) {
 
   function criarRascunhoContrato() {
     return {
-      id: crypto.randomUUID?.() || String(Date.now()), clientName: '', clientWpp: '', clientEmail: '', clientObs: '',
+      id: gid(), clientName: '', clientWpp: '', clientEmail: '', clientObs: '',
       plans: [], finalM: 0, finalP: 0, disc: 0, discObs: '', duration: '6', due: '05', payMethods: ['PIX'],
       ctObs: '', status: 'Rascunho', createdAt: new Date().toLocaleDateString('pt-BR'), createdAtRaw: Date.now(),
       clientLink: null, clientData: null, signature: null, signedAt: null, history: [], notes: '', responsavel: '', origem: '',
     };
   }
   function abrirNovoContrato() { setCtEmEdicao(criarRascunhoContrato()); setCtModo('wizard'); setActiveTab('contratos'); }
-  function gerarLinkContrato(ctFinal) {
+  // O token do link é gerado pelo SERVIDOR (crypto.randomBytes). O navegador
+  // não escolhe mais o próprio identificador de acesso ao contrato.
+  async function gerarLinkContrato(ctFinal) {
     if (ctFinal.clientLink) {
       setCtModo('lista'); setCtEmEdicao(null);
       setLinkGerado(ctFinal.clientLink);
       return;
     }
-    const token = newClientToken();
-    const atualizado = { ...ctFinal, status: 'Aguardando assinatura', clientLink: token };
+    const atualizado = { ...ctFinal, status: 'Aguardando assinatura' };
     if (!(atualizado.history || []).some((h) => h.action === 'Contrato criado')) {
       atualizado.history = atualizado.history || [];
       atualizado.history.unshift({ action: 'Contrato criado', icon: '🆕', time: now() });
     }
     addHist(atualizado, 'Link gerado e enviado ao cliente', '🔗');
-    DB.saveContrato(atualizado);
-    contratos.recarregar();
     setCtModo('lista'); setCtEmEdicao(null);
-    setLinkGerado(token);
+    try {
+      // Espera a gravação terminar antes de pedir o link (o servidor precisa
+      // já ter o contrato para associar o token a ele).
+      const gravou = await DB.saveContrato(atualizado);
+      if (!gravou) throw new Error('não consegui salvar o contrato.');
+      const { clientLink } = await gerarLinkAssinatura(atualizado.id);
+      contratos.recarregar();
+      setLinkGerado(clientLink);
+    } catch (e) {
+      contratos.recarregar();
+      alert('Contrato salvo, mas não consegui gerar o link agora: ' + e.message);
+    }
   }
   const ctVisualizando = ctVisualizandoId ? contratos.items.find((c) => c.id === ctVisualizandoId) : null;
 
@@ -290,6 +302,16 @@ export default function Dashboard({ sessao, onToggleTheme, onLogout }) {
         {activeTab === 'leadfunil' && <LeadFunilTab leads={leads} />}
         {activeTab === 'relatorios' && <RelatoriosTab relatorios={relatorios} contratos={contratos} spots={spots} catalog={catalog} />}
         {activeTab === 'prospeccao' && <ProspeccaoTab leads={leads} onVirarLead={() => setActiveTab('leadfunil')} />}
+        {activeTab === 'historico' && (
+          <HistoricoTab
+            sessao={sessao}
+            onAbrirRegistro={(tipo, id) => {
+              if (tipo === 'orcamentos') { setActiveTab('orcamentos'); setOrcVisualizandoId(id); }
+              else if (tipo === 'contratos') { setActiveTab('contratos'); setCtVisualizandoId(id); }
+              else if (tipo === 'spots') { setActiveTab('spots'); setSpotVisualizandoId(id); }
+            }}
+          />
+        )}
         {activeTab === 'usuarios' && sessao?.papel === 'admin' && <UsuariosTab sessao={sessao} />}
       </div>
 

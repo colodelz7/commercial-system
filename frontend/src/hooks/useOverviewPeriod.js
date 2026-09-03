@@ -7,11 +7,21 @@ import { dataEfetiva } from '../lib/format';
  * período comum, usado tanto nos KPIs quanto na lista "Atividade Recente".
  */
 export function useOverviewPeriod() {
-  const [ovPeriod, setOvPeriod] = useState('all'); // 'all' | '1' | '3' | '6' | '12' | 'custom'
+  const hoje = new Date();
+  // 'all' | '1' | '3' | '6' | '12' | 'mes' (mês específico) | 'custom'
+  const [ovPeriod, setOvPeriod] = useState('all');
   const [ovFrom, setOvFrom] = useState('');
   const [ovTo, setOvTo] = useState('');
+  const [mesSel, setMesSel] = useState(hoje.getMonth());
+  const [anoSel, setAnoSel] = useState(hoje.getFullYear());
 
   const range = useMemo(() => {
+    if (ovPeriod === 'mes') {
+      return {
+        start: new Date(anoSel, mesSel, 1, 0, 0, 0),
+        end: new Date(anoSel, mesSel + 1, 0, 23, 59, 59),
+      };
+    }
     if (ovPeriod === 'custom') {
       if (!ovFrom && !ovTo) return null;
       let from = ovFrom, to = ovTo;
@@ -23,8 +33,13 @@ export function useOverviewPeriod() {
     if (ovPeriod === 'all') return null;
     const n = parseInt(ovPeriod, 10);
     const now = new Date();
-    return { start: new Date(now.getFullYear(), now.getMonth() - (n - 1), 1), end: now };
-  }, [ovPeriod, ovFrom, ovTo]);
+    // Fecha no último dia do mês corrente para não cortar itens com
+    // competência no fim do mês (ex.: contrato assinado dia 30).
+    return {
+      start: new Date(now.getFullYear(), now.getMonth() - (n - 1), 1),
+      end: new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59),
+    };
+  }, [ovPeriod, ovFrom, ovTo, mesSel, anoSel]);
 
   const filtrar = useCallback((lista) => {
     if (!range) return lista;
@@ -48,5 +63,15 @@ export function useOverviewPeriod() {
     setOvFrom(''); setOvTo(''); setOvPeriod('all');
   }, []);
 
-  return { ovPeriod, ovFrom, ovTo, setOvFrom, setOvTo, filtrar, selecionarPeriodo, aplicarCustom, limparCustom };
+  /** Seleciona um mês específico (ex.: ver só agosto de 2026). */
+  const selecionarMes = useCallback((mes, ano) => {
+    setMesSel(mes); setAnoSel(ano);
+    setOvFrom(''); setOvTo('');
+    setOvPeriod('mes');
+  }, []);
+
+  return {
+    ovPeriod, ovFrom, ovTo, setOvFrom, setOvTo, filtrar, selecionarPeriodo,
+    aplicarCustom, limparCustom, mesSel, anoSel, selecionarMes,
+  };
 }

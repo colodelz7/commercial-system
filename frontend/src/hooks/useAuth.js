@@ -13,9 +13,9 @@ export function useAuth() {
   }, []);
 
   const login = useCallback(async (usuario, senha) => {
-    const ok = await DB.login(usuario, senha);
-    if (ok) { setAutenticado(true); setSessao(DB.getSessao()); }
-    return ok;
+    const r = await DB.login(usuario, senha);
+    if (r.ok) { setAutenticado(true); setSessao(DB.getSessao()); }
+    return r;
   }, []);
 
   const logout = useCallback(async () => {

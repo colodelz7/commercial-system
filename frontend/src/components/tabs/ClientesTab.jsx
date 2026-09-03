@@ -44,7 +44,7 @@ export default function ClientesTab({ clientes }) {
             <ul className="svc-inc">
               {c.email && <li>✉️ {c.email}</li>}
               {c.wpp && <li>📱 {c.wpp}</li>}
-              {c.resp && <li>👤 {c.resp}{c.cpf ? ` — CPF ${c.cpf}` : ''}</li>}
+              {c.resp && <li>👤 {c.resp}{c.cpf ? ` · CPF ${c.cpf}` : ''}</li>}
               {c.cidade && <li>📍 {[c.rua, c.bairro, c.cidade].filter(Boolean).join(', ')}</li>}
             </ul>
             <div className="svc-actions">

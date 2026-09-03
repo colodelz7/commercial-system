@@ -8,7 +8,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
       POSTGRES_DB: ${POSTGRES_DB:?defina POSTGRES_DB no .env}
     ports:
-      - "5432:5432"
+      # 127.0.0.1 na frente é essencial: "5432:5432" publica o banco em TODAS
+      # as interfaces, deixando o Postgres alcançável por qualquer máquina da
+      # rede (Wi-Fi da facul, por exemplo). Aqui ele só aceita conexão local.
+      - "127.0.0.1:5432:5432"
     volumes:
       - comercial_pgdata:/var/lib/postgresql/data
 

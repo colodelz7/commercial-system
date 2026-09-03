@@ -129,7 +129,7 @@ export default function ProspeccaoTab({ leads, onVirarLead }) {
       name: empresa.nome, empresa: empresa.nome,
       wpp: empresa.whatsapp || empresa.telefone || '',
       email: '', valor: 0, temp: 'Morna', origem: 'Buscador', stage: 'leads',
-      obs: [empresa.categoria, empresa.endereco, empresa.site].filter(Boolean).join(' — '),
+      obs: [empresa.categoria, empresa.endereco, empresa.site].filter(Boolean).join(' · '),
     });
     marcarConvertido(empresa);
     onVirarLead?.();

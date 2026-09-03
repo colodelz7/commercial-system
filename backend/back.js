@@ -38,7 +38,11 @@ try { nodemailer = require('nodemailer'); }
 catch (e) { console.warn('[AVISO] nodemailer não instalado — aviso por e-mail desativado.'); }
 
 const app = express();
-app.set('trust proxy', 1);
+// NÃO confiar em X-Forwarded-For: sem proxy reverso na frente, o cliente
+// escolheria o próprio "IP" e furaria o bloqueio por tentativas de login.
+// Se um dia entrar um proxy reverso, troque por app.set('trust proxy', ['ip.do.proxy']).
+app.set('trust proxy', false);
+app.disable('x-powered-by'); // não anunciar a stack
 
 // Cabeçalhos de segurança em toda resposta.
 app.use((req, res, next) => {
@@ -46,6 +50,19 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'geolocation=(), camera=(), microphone=(), payment=(), usb=()');
+  // Segunda camada contra XSS (o app já escapa tudo, isto é rede de segurança).
+  res.setHeader('Content-Security-Policy', [
+    "default-src 'self'",
+    "img-src 'self' data: blob: https://*.tile.openstreetmap.org",
+    "style-src 'self' 'unsafe-inline'",
+    "font-src 'self' data:",
+    "connect-src 'self' https://viacep.com.br https://brasilapi.com.br",
+    "frame-ancestors 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join('; '));
+  if (COOKIE_SECURE) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   next();
 });
 
@@ -53,6 +70,10 @@ app.use((req, res, next) => {
    CONFIGURAÇÃO / SEGREDOS (vêm do .env)
 ================================================================== */
 const PORT = process.env.PORT || 3000;
+// Por padrão escuta SÓ no localhost. Expor na rede (0.0.0.0) precisa ser uma
+// escolha explícita no .env — antes, a API inteira ficava alcançável por
+// qualquer máquina da rede local.
+const HOST = process.env.HOST || '127.0.0.1';
 const JWT_SECRET = process.env.JWT_SECRET || '';
 const JWT_EXPIRA = process.env.JWT_EXPIRA || '12h';
 const COOKIE_SECURE = process.env.COOKIE_SECURE === 'true';
@@ -95,7 +116,9 @@ app.use(cors(ALLOWED.length ? {
 
 // verify guarda o corpo bruto (req.rawBody) — necessário pra conferir a
 // assinatura HMAC do webhook do Meta (ver POST /meta/webhook mais abaixo).
-app.use(express.json({ limit: '12mb', verify: (req, res, buf) => { req.rawBody = buf; } }));
+// 2mb já cobre qualquer payload legítimo do app (anexos vão por multipart,
+// em rota própria). 12mb permitia esgotar memória com poucas requisições.
+app.use(express.json({ limit: '2mb', verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use(cookieParser());
 
 function exigeOrigemConhecida(req, res, next) {
@@ -126,8 +149,49 @@ function exigeApiSecret(req, res, next) {
 
 // As tabelas genéricas (id TEXT PK + data JSONB). O nome de tabela nunca
 // vem direto do usuário para o SQL sem passar por esta allowlist.
-const TABELAS = ['orcamentos', 'contratos', 'servicos', 'relatorios', 'leads', 'clientes', 'diagnosticos', 'spots', 'handoffs', 'logs', 'prospeccao'];
+// 'handoffs' saiu: o módulo não existe mais no frontend, e manter a tabela
+// aberta na API só aumentava a superfície de ataque sem nenhum uso.
+const TABELAS = ['orcamentos', 'contratos', 'servicos', 'relatorios', 'leads', 'clientes', 'diagnosticos', 'spots', 'logs', 'prospeccao'];
 function tabelaValida(t) { return TABELAS.includes(t); }
+
+// Como cada tabela aparece na aba Histórico.
+const ROTULO_TABELA = {
+  orcamentos: { label: 'Orçamento', icon: '📄' },
+  contratos: { label: 'Contrato', icon: '📝' },
+  spots: { label: 'SPOT', icon: '⚡' },
+  clientes: { label: 'Cliente', icon: '🏢' },
+  servicos: { label: 'Serviço', icon: '🏷️' },
+  leads: { label: 'Lead', icon: '🎯' },
+  diagnosticos: { label: 'Diagnóstico', icon: '🔍' },
+  relatorios: { label: 'Relatório', icon: '📊' },
+  prospeccao: { label: 'Prospecção', icon: '🔎' },
+};
+/** Valor financeiro do registro, quando faz sentido (aparece no Histórico). */
+function valorDoRegistro(tabela, item) {
+  if (!item || typeof item !== 'object') return 0;
+  if (tabela === 'contratos') return (parseFloat(item.finalM) || 0) + (parseFloat(item.finalP) || 0);
+  if (tabela === 'orcamentos' || tabela === 'spots') {
+    const svcs = item.services || [];
+    const bruto = svcs.reduce((a, s) => a + (parseFloat(s.price) || 0) * (parseFloat(s.qtd) || 1), 0);
+    return bruto * (1 - (parseFloat(item.disc) || 0) / 100);
+  }
+  if (tabela === 'relatorios') return parseFloat(item.valor) || 0;
+  if (tabela === 'leads') return parseFloat(item.valor) || 0;
+  if (tabela === 'servicos') return parseFloat(item.price) || 0;
+  return 0;
+}
+
+/** Nome legível de um registro, pra mensagem do histórico ficar útil. */
+function descreverRegistro(tabela, item) {
+  if (!item || typeof item !== 'object') return '';
+  if (tabela === 'relatorios') {
+    if (String(item.id || '').startsWith('meta-')) return 'meta de ' + String(item.id).replace('meta-', '');
+    return 'dia ' + String(item.id || '').split('-').reverse().join('/');
+  }
+  const nome = item.clientName || item.name || item.nome || item.empresa || '';
+  const seq = item.seq ? 'Nº ' + String(item.seq).padStart(4, '0') : '';
+  return (seq + (nome ? (seq ? ' · ' : '') + nome : '')).trim() || String(item.id || '');
+}
 
 /* ==================================================================
    AUTENTICAÇÃO — bcrypt + JWT em cookie httpOnly
@@ -139,20 +203,55 @@ function enviarCookie(res, token) {
   res.cookie(COOKIE_NOME, token, {
     httpOnly: true,
     secure: COOKIE_SECURE,
-    sameSite: 'lax',
+    // O app não tem nenhum fluxo vindo de outro site, então Strict é seguro
+    // e fecha a brecha de CSRF que sobrava com Lax.
+    sameSite: 'strict',
     maxAge: 12 * 60 * 60 * 1000,
     path: '/',
   });
 }
-function exigeAuth(req, res, next) {
+
+/* Cache curto do estado da conta (papel/ativo). Sem isso, revalidar no banco
+   custaria uma consulta por requisição; com 15s, desativar ou rebaixar alguém
+   passa a valer quase na hora, em vez de só quando o token expirasse (12h). */
+const _contasCache = new Map();
+const CONTA_TTL_MS = 15 * 1000;
+function invalidarContaCache(id) { _contasCache.delete(String(id)); }
+async function contaAtual(id) {
+  const k = String(id);
+  const agora = Date.now();
+  const cached = _contasCache.get(k);
+  if (cached && agora < cached.exp) return cached.v;
+  const r = await q('SELECT id, usuario, nome, papel, ativo FROM usuarios WHERE id = $1 LIMIT 1', [k]);
+  const v = r.rows[0] || null;
+  _contasCache.set(k, { v, exp: agora + CONTA_TTL_MS });
+  if (_contasCache.size > 500) _contasCache.delete(_contasCache.keys().next().value);
+  return v;
+}
+
+async function exigeAuth(req, res, next) {
   const token = req.cookies && req.cookies[COOKIE_NOME];
   if (!token) return res.status(401).json({ error: 'Não autenticado.' });
+  let payload;
   try {
-    req.usuario = jwt.verify(token, JWT_SECRET);
-    next();
+    payload = jwt.verify(token, JWT_SECRET);
   } catch (e) {
     res.clearCookie(COOKIE_NOME, { path: '/' });
     return res.status(401).json({ error: 'Sessão expirada. Entre novamente.' });
+  }
+  // O token diz quem é, mas quem manda é o banco: conta apagada, desativada ou
+  // rebaixada perde o acesso (e o papel de admin) imediatamente.
+  try {
+    const conta = await contaAtual(payload.sub);
+    if (!conta || !conta.ativo) {
+      res.clearCookie(COOKIE_NOME, { path: '/' });
+      return res.status(401).json({ error: 'Sessão encerrada. Entre novamente.' });
+    }
+    req.usuario = { sub: conta.id, usuario: conta.usuario, nome: conta.nome, papel: conta.papel };
+    next();
+  } catch (e) {
+    console.error('[auth] falha ao revalidar sessão:', e.message);
+    return res.status(503).json({ error: 'Não consegui validar a sessão agora.' });
   }
 }
 function exigeAdmin(req, res, next) {
@@ -160,37 +259,91 @@ function exigeAdmin(req, res, next) {
   next();
 }
 
+/** Resume o user-agent em algo legível: "Chrome 120 no Windows". */
+function resumirAgente(ua) {
+  const s = String(ua || '');
+  if (!s) return '';
+  const nav = s.match(/(Edg|OPR|Chrome|Firefox|Safari)\/(\d+)/);
+  const so = /Windows/i.test(s) ? 'Windows'
+    : /Android/i.test(s) ? 'Android'
+      : /(iPhone|iPad|iOS)/i.test(s) ? 'iOS'
+        : /Mac OS X/i.test(s) ? 'macOS'
+          : /Linux/i.test(s) ? 'Linux' : '';
+  const nomes = { Edg: 'Edge', OPR: 'Opera', Chrome: 'Chrome', Firefox: 'Firefox', Safari: 'Safari' };
+  const navTxt = nav ? `${nomes[nav[1]] || nav[1]} ${nav[2]}` : '';
+  return [navTxt, so && `no ${so}`].filter(Boolean).join(' ');
+}
+
 async function registrarLog(entry) {
   try {
     const id = 'log' + Date.now() + Math.random().toString(36).slice(2, 7);
-    const rec = Object.assign({ id, time: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }), user: '', refId: '' }, entry);
+    const agora = new Date();
+    const rec = Object.assign({
+      id,
+      time: agora.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+      timeISO: agora.toISOString(), // para a tela mostrar a data por extenso
+      user: '', refId: '',
+    }, entry);
     await q('INSERT INTO logs (id, data) VALUES ($1, $2::jsonb) ON CONFLICT (id) DO NOTHING', [id, JSON.stringify(rec)]);
   } catch (e) { console.error('[log] falha ao registrar:', e.message); }
 }
 
-// 5 falhas seguidas do mesmo IP => bloqueia 5 min o login de qualquer conta.
-const LOGIN_MAX_FALHAS = 5;
+// 3 senhas erradas seguidas => bloqueia o login por 5 minutos.
+// O bloqueio é por IP E por conta: assim trocar de máquina não libera a conta,
+// e trocar de conta não libera a máquina.
+const LOGIN_MAX_FALHAS = 3;
 const LOGIN_BLOQUEIO_MS = 5 * 60 * 1000;
 const _loginFalhas = new Map();
 setInterval(() => {
   const now = Date.now();
-  for (const [ip, f] of _loginFalhas) if (now > (f.blockedUntil || 0) && !f.count) _loginFalhas.delete(ip);
+  for (const [k, f] of _loginFalhas) if (now > (f.blockedUntil || 0) && !f.count) _loginFalhas.delete(k);
+  if (_loginFalhas.size > 5000) _loginFalhas.clear(); // teto duro de memória
 }, 60 * 1000).unref();
-function loginBloqueado(ip) {
-  const f = _loginFalhas.get(ip);
-  return (f && f.blockedUntil > Date.now()) ? Math.ceil((f.blockedUntil - Date.now()) / 60000) : 0;
+
+function chavesDe(ip, usuario) {
+  const chaves = ['ip|' + ip];
+  if (usuario) chaves.push('user|' + usuario);
+  return chaves;
 }
-function registrarFalhaLogin(ip) {
-  let f = _loginFalhas.get(ip);
-  if (!f) f = { count: 0, blockedUntil: 0 };
-  else if (f.blockedUntil && Date.now() > f.blockedUntil) f = { count: 0, blockedUntil: 0 };
-  f.count++;
-  let bloqueou = false;
-  if (f.count >= LOGIN_MAX_FALHAS) { f.blockedUntil = Date.now() + LOGIN_BLOQUEIO_MS; f.count = 0; bloqueou = true; }
-  _loginFalhas.set(ip, f);
+/** Segundos restantes de bloqueio (0 = liberado). */
+function segundosBloqueado(ip, usuario) {
+  let restante = 0;
+  for (const k of chavesDe(ip, usuario)) {
+    const f = _loginFalhas.get(k);
+    if (f && f.blockedUntil > Date.now()) restante = Math.max(restante, Math.ceil((f.blockedUntil - Date.now()) / 1000));
+  }
+  return restante;
+}
+/** Registra uma falha; devolve os segundos de bloqueio se estourou o limite. */
+function registrarFalhaLogin(ip, usuario) {
+  let bloqueou = 0;
+  for (const k of chavesDe(ip, usuario)) {
+    let f = _loginFalhas.get(k);
+    if (!f) f = { count: 0, blockedUntil: 0 };
+    else if (f.blockedUntil && Date.now() > f.blockedUntil) f = { count: 0, blockedUntil: 0 };
+    f.count++;
+    if (f.count >= LOGIN_MAX_FALHAS) {
+      f.blockedUntil = Date.now() + LOGIN_BLOQUEIO_MS;
+      f.count = 0;
+      bloqueou = Math.ceil(LOGIN_BLOQUEIO_MS / 1000);
+    }
+    _loginFalhas.set(k, f);
+  }
   return bloqueou;
 }
-function limparFalhasLogin(ip) { _loginFalhas.delete(ip); }
+function tentativasRestantes(ip, usuario) {
+  let usadas = 0;
+  for (const k of chavesDe(ip, usuario)) {
+    const f = _loginFalhas.get(k);
+    if (f && f.count > usadas) usadas = f.count;
+  }
+  return Math.max(0, LOGIN_MAX_FALHAS - usadas);
+}
+function limparFalhasLogin(ip, usuario) { for (const k of chavesDe(ip, usuario)) _loginFalhas.delete(k); }
+
+// Hash descartável: comparar contra ele quando o usuário não existe faz o
+// login gastar o mesmo tempo dos dois jeitos, sem entregar quais logins existem.
+const HASH_FICTICIO = bcrypt.hashSync('senha_inexistente_para_timing', 12);
 
 app.post('/api/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 30, chave: 'login' }), async (req, res) => {
   const ip = ipDe(req);
@@ -199,37 +352,41 @@ app.post('/api/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 30, chave: 'lo
     const usuario = String(body.usuario || '').trim().toLowerCase();
     const senha = String(body.senha || '');
 
-    const minsBloq = loginBloqueado(ip);
-    if (minsBloq > 0) {
-      registrarLog({ tipo: 'login', tipoLabel: 'Login', icon: '🚫', action: 'Tentativa durante bloqueio temporário (IP ' + ip + ')', nome: usuario || '—' });
-      return res.status(429).json({ error: 'Acesso bloqueado por excesso de tentativas. Aguarde ' + minsBloq + ' minuto(s).', bloqueado: true, minutos: minsBloq });
+    const segBloq = segundosBloqueado(ip, usuario);
+    if (segBloq > 0) {
+      registrarLog({ tipo: 'login', tipoLabel: 'Login', icon: '🚫', action: 'Tentativa de login durante bloqueio, conta "' + (usuario || 'sem nome') + '"', nome: usuario || 'sem nome', ip, agente: resumirAgente(req.get('user-agent')), segundosRestantes: segBloq });
+      return res.status(429).json({ error: 'Acesso bloqueado por excesso de tentativas.', bloqueado: true, segundos: segBloq });
     }
     if (!usuario || !senha) return res.status(400).json({ error: 'Informe usuário e senha.' });
 
     const r = await q('SELECT id, usuario, nome, senha_hash, papel, ativo FROM usuarios WHERE lower(usuario) = $1 LIMIT 1', [usuario]);
     const u = r.rows[0];
-    const generico = { error: 'Usuário ou senha inválidos.' };
 
-    function bloqMsg() {
-      const mins = loginBloqueado(ip) || Math.ceil(LOGIN_BLOQUEIO_MS / 60000);
-      return { error: 'Você errou o login 5 vezes. Acesso bloqueado por ' + mins + ' minuto(s).', bloqueado: true, minutos: mins };
+    // Sempre roda um bcrypt.compare, exista o usuário ou não (tempo constante),
+    // e a resposta é a mesma para login inexistente, desativado ou senha errada
+    // — nada aqui revela quais contas existem.
+    const senhaConfere = await bcrypt.compare(senha, (u && u.senha_hash) || HASH_FICTICIO);
+    const acessoOk = !!u && u.ativo && senhaConfere;
+
+    if (!acessoOk) {
+      const motivo = !u ? 'usuário inexistente' : (!u.ativo ? 'usuário desativado' : 'senha incorreta');
+      const segundos = registrarFalhaLogin(ip, usuario);
+      const restantes = tentativasRestantes(ip, usuario);
+      registrarLog({
+        tipo: 'login', tipoLabel: 'Login', icon: segundos ? '🚫' : '⛔',
+        action: (segundos ? 'Conta bloqueada por 5 min após ' + LOGIN_MAX_FALHAS + ' tentativas. ' : '')
+          + 'Tentativa de login falhou (' + motivo + '), conta "' + (usuario || 'sem nome') + '"',
+        nome: usuario || 'sem nome', ip, agente: resumirAgente(req.get('user-agent')), motivo,
+        tentativasRestantes: restantes,
+      });
+      if (segundos) return res.status(429).json({ error: 'Você errou ' + LOGIN_MAX_FALHAS + ' vezes. Acesso bloqueado por 5 minutos.', bloqueado: true, segundos });
+      return res.status(401).json({ error: 'Usuário ou senha inválidos.', tentativasRestantes: restantes });
     }
-    function falhou(motivo) {
-      const bloqueou = registrarFalhaLogin(ip);
-      registrarLog({ tipo: 'login', tipoLabel: 'Login', icon: bloqueou ? '🚫' : '⛔', action: (bloqueou ? 'IP bloqueado por 5 min após 5 falhas. ' : '') + 'Tentativa de login falhou (' + motivo + '): usuário "' + (usuario || '—') + '" · IP ' + ip, nome: usuario || '—' });
-      return bloqueou;
-    }
 
-    if (!u) { if (falhou('usuário inexistente')) return res.status(429).json(bloqMsg()); return res.status(401).json(generico); }
-    if (!u.ativo) { if (falhou('usuário desativado')) return res.status(429).json(bloqMsg()); return res.status(403).json({ error: 'Usuário desativado. Fale com um administrador.' }); }
-
-    const ok = await bcrypt.compare(senha, u.senha_hash);
-    if (!ok) { if (falhou('senha incorreta')) return res.status(429).json(bloqMsg()); return res.status(401).json(generico); }
-
-    limparFalhasLogin(ip);
+    limparFalhasLogin(ip, usuario);
     await q('UPDATE usuarios SET ultimo_login = now() WHERE id = $1', [u.id]);
     enviarCookie(res, gerarToken(u));
-    registrarLog({ tipo: 'login', tipoLabel: 'Login', icon: '🔓', action: 'Login efetuado (IP ' + ip + ')', nome: u.usuario, user: u.nome });
+    registrarLog({ tipo: 'login', tipoLabel: 'Login', icon: '🔓', action: 'Login efetuado', nome: u.usuario, user: u.nome, ip, agente: resumirAgente(req.get('user-agent')), papel: u.papel });
     res.json({ ok: true, usuario: { id: u.id, usuario: u.usuario, nome: u.nome, papel: u.papel } });
   } catch (e) {
     console.error('[auth] erro no login:', e.message);
@@ -237,7 +394,17 @@ app.post('/api/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 30, chave: 'lo
   }
 });
 
-app.post('/api/logout', (req, res) => { res.clearCookie(COOKIE_NOME, { path: '/' }); res.json({ ok: true }); });
+app.post('/api/logout', (req, res) => {
+  try {
+    const token = req.cookies && req.cookies[COOKIE_NOME];
+    if (token) {
+      const u = jwt.verify(token, JWT_SECRET);
+      registrarLog({ tipo: 'login', tipoLabel: 'Login', icon: '🔒', action: 'Logout', nome: u.usuario, user: u.nome, ip: ipDe(req), agente: resumirAgente(req.get('user-agent')) });
+    }
+  } catch (e) { /* token inválido: nada a registrar */ }
+  res.clearCookie(COOKIE_NOME, { path: '/' });
+  res.json({ ok: true });
+});
 
 app.get('/api/session', (req, res) => {
   const token = req.cookies && req.cookies[COOKIE_NOME];
@@ -254,6 +421,17 @@ app.get('/api/session', (req, res) => {
 /* ==================================================================
    GESTÃO DE USUÁRIOS (só admin). Senha nunca sai daqui.
 ================================================================== */
+/** Regras de senha (valem para senhas NOVAS; não afeta quem já tem conta). */
+function validaForcaSenha(senha, login) {
+  const s = String(senha || '');
+  if (s.length < 8) return 'A senha precisa ter pelo menos 8 caracteres.';
+  if (/^\d+$/.test(s)) return 'A senha não pode ser só números.';
+  if (login && s.toLowerCase().includes(String(login).toLowerCase())) return 'A senha não pode conter o próprio login.';
+  const comuns = ['12345678', 'senha123', 'password', 'admin123', 'qwertyui', '11111111'];
+  if (comuns.includes(s.toLowerCase())) return 'Essa senha é muito comum. Escolha outra.';
+  return null;
+}
+
 app.get('/api/usuarios', exigeAuth, exigeAdmin, async (req, res) => {
   try {
     const r = await q('SELECT id, usuario, nome, papel, ativo, ultimo_login, criado_em FROM usuarios ORDER BY nome');
@@ -274,11 +452,13 @@ app.post('/api/usuarios', exigeAuth, exigeAdmin, async (req, res) => {
 
     if (!/^[a-z0-9_.-]{3,32}$/.test(usuario)) return res.status(400).json({ error: 'Usuário inválido (3 a 32 caracteres, sem espaço nem acento).' });
     if (!nome) return res.status(400).json({ error: 'Informe o nome.' });
-    if (senha.length < 6) return res.status(400).json({ error: 'A senha precisa ter pelo menos 6 caracteres.' });
+    const erroSenha = validaForcaSenha(senha, usuario);
+    if (erroSenha) return res.status(400).json({ error: erroSenha });
 
     const id = 'u' + Date.now() + crypto.randomBytes(3).toString('hex');
     const hash = await bcrypt.hash(senha, 12);
     await q('INSERT INTO usuarios (id, usuario, nome, senha_hash, papel) VALUES ($1,$2,$3,$4,$5)', [id, usuario, nome, hash, papel]);
+    registrarLog({ tipo: 'usuarios', tipoLabel: 'Usuário', icon: '👥', action: 'Usuário criado: "' + nome + '" (@' + usuario + ', ' + papel + ')', user: req.usuario.nome, refId: id });
     res.json({ ok: true, id });
   } catch (e) {
     if (e.code === '23505') return res.status(409).json({ error: 'Já existe um usuário com esse login.' });
@@ -290,29 +470,47 @@ app.post('/api/usuarios', exigeAuth, exigeAdmin, async (req, res) => {
 app.put('/api/usuarios/:id', exigeAuth, exigeAdmin, async (req, res) => {
   try {
     const b = req.body || {};
-    const campos = [], vals = [];
+    const campos = [], vals = [], mudancas = [];
+
+    // Normaliza ANTES de comparar: "0", 0, "false" e false significam a mesma
+    // coisa. Antes, a trava só reconhecia o booleano `false` e dava para se
+    // auto-desativar mandando {"ativo": 0}.
+    const querPapel = b.papel === undefined ? undefined : (String(b.papel).toLowerCase() === 'admin' ? 'admin' : 'usuario');
+    const querAtivo = b.ativo === undefined ? undefined
+      : !(b.ativo === false || b.ativo === 0 || b.ativo === '0' || String(b.ativo).toLowerCase() === 'false');
+
     if (b.usuario !== undefined) {
       const novoLogin = String(b.usuario).trim().toLowerCase();
       if (!/^[a-z0-9_.-]{3,32}$/.test(novoLogin)) return res.status(400).json({ error: 'Login inválido (3 a 32 caracteres, sem espaço nem acento).' });
-      campos.push('usuario = $' + vals.push(novoLogin));
+      campos.push('usuario = $' + vals.push(novoLogin)); mudancas.push('login → @' + novoLogin);
     }
-    if (b.nome !== undefined) campos.push('nome = $' + vals.push(String(b.nome).trim()));
-    if (b.papel !== undefined) campos.push('papel = $' + vals.push(b.papel === 'admin' ? 'admin' : 'usuario'));
-    if (b.ativo !== undefined) campos.push('ativo = $' + vals.push(!!b.ativo));
+    if (b.nome !== undefined) { campos.push('nome = $' + vals.push(String(b.nome).trim())); mudancas.push('nome → ' + String(b.nome).trim()); }
+    if (querPapel !== undefined) { campos.push('papel = $' + vals.push(querPapel)); mudancas.push('permissão → ' + querPapel); }
+    if (querAtivo !== undefined) { campos.push('ativo = $' + vals.push(querAtivo)); mudancas.push(querAtivo ? 'reativado' : 'desativado'); }
     if (b.senha) {
-      if (String(b.senha).length < 6) return res.status(400).json({ error: 'A senha precisa ter pelo menos 6 caracteres.' });
-      campos.push('senha_hash = $' + vals.push(await bcrypt.hash(String(b.senha), 12)));
+      const alvoLogin = b.usuario !== undefined ? String(b.usuario) : '';
+      const erroSenha = validaForcaSenha(String(b.senha), alvoLogin);
+      if (erroSenha) return res.status(400).json({ error: erroSenha });
+      campos.push('senha_hash = $' + vals.push(await bcrypt.hash(String(b.senha), 12))); mudancas.push('senha alterada');
     }
     if (!campos.length) return res.status(400).json({ error: 'Nada para atualizar.' });
 
-    // Um admin não pode se rebaixar/desativar sozinho (senão ninguém mais administra).
-    if (req.params.id === req.usuario.sub && (b.papel === 'usuario' || b.ativo === false)) {
+    const ehEuMesmo = req.params.id === req.usuario.sub;
+    if (ehEuMesmo && (querPapel === 'usuario' || querAtivo === false)) {
       return res.status(400).json({ error: 'Você não pode remover o próprio acesso de administrador. Peça para outro admin.' });
+    }
+    // Não deixar o sistema ficar sem nenhum admin ativo (senão ninguém mais
+    // consegue gerenciar contas e não há como voltar pela interface).
+    if (querPapel === 'usuario' || querAtivo === false) {
+      const admins = await q("SELECT count(*)::int AS n FROM usuarios WHERE papel = 'admin' AND ativo = true AND id <> $1", [req.params.id]);
+      if (!admins.rows[0].n) return res.status(400).json({ error: 'Este é o último administrador ativo. Promova outra pessoa antes de mudar esta conta.' });
     }
 
     vals.push(req.params.id);
     const r = await q('UPDATE usuarios SET ' + campos.join(', ') + ' WHERE id = $' + vals.length, vals);
     if (!r.rowCount) return res.status(404).json({ error: 'Usuário não encontrado.' });
+    invalidarContaCache(req.params.id);
+    registrarLog({ tipo: 'usuarios', tipoLabel: 'Usuário', icon: '👥', action: 'Usuário editado (' + mudancas.join(', ') + ')', user: req.usuario.nome, refId: req.params.id });
     res.json({ ok: true });
   } catch (e) {
     if (e.code === '23505') return res.status(409).json({ error: 'Já existe um usuário com esse login.' });
@@ -324,8 +522,16 @@ app.put('/api/usuarios/:id', exigeAuth, exigeAdmin, async (req, res) => {
 app.delete('/api/usuarios/:id', exigeAuth, exigeAdmin, async (req, res) => {
   try {
     if (req.params.id === req.usuario.sub) return res.status(400).json({ error: 'Você não pode apagar a si mesmo.' });
+    const alvo = await q('SELECT usuario, nome, papel FROM usuarios WHERE id = $1', [req.params.id]);
+    if (!alvo.rows.length) return res.status(404).json({ error: 'Usuário não encontrado.' });
+    if (alvo.rows[0].papel === 'admin') {
+      const admins = await q("SELECT count(*)::int AS n FROM usuarios WHERE papel = 'admin' AND ativo = true AND id <> $1", [req.params.id]);
+      if (!admins.rows[0].n) return res.status(400).json({ error: 'Este é o último administrador ativo. Promova outra pessoa antes de apagar esta conta.' });
+    }
     const r = await q('DELETE FROM usuarios WHERE id = $1', [req.params.id]);
     if (!r.rowCount) return res.status(404).json({ error: 'Usuário não encontrado.' });
+    invalidarContaCache(req.params.id);
+    registrarLog({ tipo: 'usuarios', tipoLabel: 'Usuário', icon: '👥', action: 'Usuário excluído: "' + alvo.rows[0].nome + '" (@' + alvo.rows[0].usuario + ')', user: req.usuario.nome, refId: req.params.id });
     res.json({ ok: true });
   } catch (e) {
     console.error('[usuarios] erro ao remover:', e.message);
@@ -393,6 +599,11 @@ app.post('/api/anexos', exigeAuth, upload.single('file'), async (req, res) => {
     fs.mkdirSync(path.dirname(destino), { recursive: true });
     fs.writeFileSync(destino, req.file.buffer);
 
+    registrarLog({
+      tipo: 'anexos', tipoLabel: 'Anexo', icon: '📎',
+      action: 'Anexo enviado: ' + nome + ' (' + Math.round(req.file.size / 1024) + ' KB) no diagnóstico ' + diagId,
+      user: (req.usuario && req.usuario.nome) || '', refId: diagId,
+    });
     res.json({ nome: req.file.originalname, path: relativo, tipo: req.file.mimetype, tamanho: req.file.size, criadoEm: new Date().toISOString() });
   } catch (e) {
     console.error('[anexos] erro no upload:', e.message);
@@ -420,6 +631,11 @@ app.delete(/^\/api\/anexos\/(.+)$/, exigeAuth, (req, res) => {
     const alvo = path.resolve(UPLOAD_DIR, relativo);
     if (!alvo.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) return res.status(400).json({ error: 'Caminho inválido.' });
     if (fs.existsSync(alvo)) fs.unlinkSync(alvo);
+    registrarLog({
+      tipo: 'anexos', tipoLabel: 'Anexo', icon: '🗑️',
+      action: 'Anexo removido: ' + path.basename(relativo),
+      user: (req.usuario && req.usuario.nome) || '',
+    });
     res.json({ ok: true });
   } catch (e) {
     console.error('[anexos] erro ao remover:', e.message);
@@ -467,12 +683,14 @@ const SEG_OSM = {
   'bar': ['nwr["amenity"="bar"]', 'nwr["amenity"="pub"]', 'nwr["amenity"="biergarten"]'],
   'seguros': ['nwr["office"="insurance"]'],
 };
+// Espelhos oficiais/comunitários do OpenStreetMap. O espelho maps.mail.ru saiu
+// da lista: as buscas de prospecção (cidades e segmentos que a empresa está
+// pesquisando) não precisam sair para um servidor de terceiro não verificado.
 const OVERPASS_EPS = [
+  'https://overpass-api.de/api/interpreter',
   'https://overpass.openstreetmap.fr/api/interpreter',
-  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
   'https://overpass.private.coffee/api/interpreter',
-  'https://overpass-api.de/api/interpreter',
 ];
 async function overpassFetch(ql, startIdx, abortMs) {
   let ultimoErro = 'sem resposta';
@@ -699,8 +917,13 @@ app.get('/api/:tabela', exigeAuth, async (req, res) => {
   const t = req.params.tabela;
   if (!tabelaValida(t)) return res.status(404).json({ error: 'Tabela não encontrada.' });
   try {
-    if (t === 'logs' && (!req.usuario || req.usuario.papel !== 'admin')) {
-      const r = await q("SELECT data FROM logs WHERE (data->>'tipo') IS DISTINCT FROM 'login' ORDER BY criado_em");
+    const ehAdmin = req.usuario && req.usuario.papel === 'admin';
+    if (t === 'logs' && !ehAdmin) {
+      const r = await q("SELECT data FROM logs WHERE (data->>'tipo') IS DISTINCT FROM 'login' ORDER BY criado_em DESC LIMIT 2000");
+      return res.json(r.rows.map((x) => x.data));
+    }
+    if (t === 'logs') {
+      const r = await q('SELECT data FROM logs ORDER BY criado_em DESC LIMIT 2000');
       return res.json(r.rows.map((x) => x.data));
     }
     const r = await q('SELECT data FROM ' + t + ' ORDER BY criado_em');
@@ -716,6 +939,7 @@ app.post('/api/:tabela', exigeAuth, async (req, res) => {
   if (!tabelaValida(t)) return res.status(404).json({ error: 'Tabela não encontrada.' });
   const itens = Array.isArray(req.body) ? req.body : [req.body];
   if (!itens.length) return res.json({ ok: true, gravados: 0 });
+  if (itens.length > 500) return res.status(413).json({ error: 'Lote muito grande (máximo de 500 itens por vez).' });
 
   if (t === 'logs') {
     const nome = (req.usuario && req.usuario.nome) || '';
@@ -727,11 +951,45 @@ app.post('/api/:tabela', exigeAuth, async (req, res) => {
   try {
     const onConflict = t === 'logs' ? 'ON CONFLICT (id) DO NOTHING' : 'ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data';
     await cliente.query('BEGIN');
+    const registros = [];
     for (const item of itens) {
       if (!item || !item.id) throw new Error('Item sem id.');
-      await cliente.query('INSERT INTO ' + t + ' (id, data) VALUES ($1, $2::jsonb) ' + onConflict, [String(item.id), JSON.stringify(item)]);
+      let payload = item;
+      // O token do link de assinatura é gerado e mantido pelo servidor: o
+      // cliente nunca escolhe nem sobrescreve (ver POST /api/contratos/:id/link).
+      if (t === 'contratos') {
+        const atualLink = await cliente.query("SELECT data->>'clientLink' AS link FROM contratos WHERE id = $1", [String(item.id)]);
+        const linkGuardado = atualLink.rows.length ? atualLink.rows[0].link : null;
+        payload = { ...item, clientLink: linkGuardado || null };
+      }
+      // xmax = 0 identifica INSERT; qualquer outro valor veio de UPDATE.
+      const r = await cliente.query(
+        'INSERT INTO ' + t + ' (id, data) VALUES ($1, $2::jsonb) ' + onConflict + ' RETURNING (xmax = 0) AS criado',
+        [String(payload.id), JSON.stringify(payload)]
+      );
+      registros.push({ item: payload, criado: r.rows.length ? r.rows[0].criado : true });
     }
     await cliente.query('COMMIT');
+
+    // Histórico: uma entrada por registro gravado (exceto a própria tabela de logs).
+    if (t !== 'logs') {
+      const rot = ROTULO_TABELA[t] || { label: t, icon: '•' };
+      for (const { item, criado } of registros) {
+        registrarLog({
+          tipo: t, tipoLabel: rot.label, icon: rot.icon,
+          action: rot.label + (criado ? ' criado' : ' atualizado') + ': ' + descreverRegistro(t, item)
+            + (item.status ? ' · ' + item.status : ''),
+          user: (req.usuario && req.usuario.nome) || '', refId: String(item.id),
+          // Contexto extra para a tela de Histórico abrir os detalhes do evento
+          // sem precisar interpretar o texto da ação.
+          ip: ipDe(req),
+          operacao: criado ? 'criado' : 'atualizado',
+          cliente: item.clientName || item.name || item.nome || item.empresa || '',
+          statusRegistro: item.status || '',
+          valor: valorDoRegistro(t, item),
+        });
+      }
+    }
     res.json({ ok: true, gravados: itens.length });
   } catch (e) {
     await cliente.query('ROLLBACK').catch(() => {});
@@ -742,14 +1000,33 @@ app.post('/api/:tabela', exigeAuth, async (req, res) => {
   }
 });
 
+// Menos privilégio: registros-base (a carteira de clientes, contratos fechados,
+// o catálogo e a auditoria) só um admin apaga. O trabalho do dia a dia
+// (orçamentos, SPOTs, leads, diagnósticos) segue livre para a equipe.
+const APAGAR_SO_ADMIN = ['contratos', 'clientes', 'servicos', 'logs'];
+
 app.delete('/api/:tabela/:id', exigeAuth, async (req, res) => {
   const t = req.params.tabela;
   if (!tabelaValida(t)) return res.status(404).json({ error: 'Tabela não encontrada.' });
-  if (t === 'logs' && (!req.usuario || req.usuario.papel !== 'admin')) {
-    return res.status(403).json({ error: 'Apenas administradores podem apagar registros de auditoria.' });
+  if (APAGAR_SO_ADMIN.includes(t) && (!req.usuario || req.usuario.papel !== 'admin')) {
+    return res.status(403).json({ error: 'Apenas administradores podem excluir este tipo de registro.' });
   }
   try {
+    const antes = t === 'logs' ? { rows: [] } : await q('SELECT data FROM ' + t + ' WHERE id = $1', [String(req.params.id)]);
     await q('DELETE FROM ' + t + ' WHERE id = $1', [String(req.params.id)]);
+    if (t !== 'logs') {
+      const rot = ROTULO_TABELA[t] || { label: t, icon: '•' };
+      const anterior = antes.rows.length ? antes.rows[0].data : null;
+      registrarLog({
+        tipo: t, tipoLabel: rot.label, icon: '🗑️',
+        action: rot.label + ' excluído: ' + (anterior ? descreverRegistro(t, anterior) : String(req.params.id)),
+        user: (req.usuario && req.usuario.nome) || '', refId: String(req.params.id),
+        ip: ipDe(req), operacao: 'excluido',
+        cliente: anterior ? (anterior.clientName || anterior.name || anterior.nome || anterior.empresa || '') : '',
+        statusRegistro: anterior ? (anterior.status || '') : '',
+        valor: anterior ? valorDoRegistro(t, anterior) : 0,
+      });
+    }
     res.json({ ok: true });
   } catch (e) {
     console.error('[api] erro ao apagar de', t + ':', e.message);
@@ -763,9 +1040,46 @@ app.delete('/api/:tabela/:id', exigeAuth, async (req, res) => {
    ainda vazio) e history (só acrescenta) entram. Status "Assinado" só vem
    do webhook da Autentique — o cliente nunca consegue setar isso.
 ================================================================== */
+/* Gera o token do link de assinatura NO SERVIDOR, com crypto.randomBytes.
+   Antes o frontend gerava e, fora de contexto seguro (HTTP na rede),
+   crypto.randomUUID não existe e o código caía num fallback com Math.random —
+   token previsível dá acesso ao contrato de outro cliente. */
+app.post('/api/contratos/:id/link', exigeAuth, async (req, res) => {
+  try {
+    const id = String(req.params.id || '');
+    const r = await q('SELECT data FROM contratos WHERE id = $1 LIMIT 1', [id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Contrato não encontrado.' });
+    const atual = r.rows[0].data || {};
+    if (atual.clientLink) return res.json({ clientLink: atual.clientLink, novo: false });
+
+    const token = crypto.randomBytes(32).toString('base64url');
+    const novo = { ...atual, clientLink: token };
+    await q('UPDATE contratos SET data = $1::jsonb WHERE id = $2', [JSON.stringify(novo), id]);
+    registrarLog({
+      tipo: 'contratos', tipoLabel: 'Contrato', icon: '🔗',
+      action: 'Link de assinatura gerado: ' + (novo.clientName || id),
+      user: (req.usuario && req.usuario.nome) || '', refId: id,
+    });
+    res.json({ clientLink: token, novo: true });
+  } catch (e) {
+    console.error('[contrato-link] erro ao gerar token:', e.message);
+    res.status(500).json({ error: 'Não consegui gerar o link.' });
+  }
+});
+
 const CAMPOS_CLIENTE = ['razao', 'fantasia', 'cnpj', 'email', 'rua', 'comp', 'bairro', 'cidade', 'cep', 'resp', 'cpf', 'wpp'];
 const STATUS_CLIENTE_OK = ['Aguardando assinatura'];
 function limparTexto(v, max) { if (v === undefined || v === null) return ''; return String(v).slice(0, max || 200).trim(); }
+
+/* Só estes campos saem para o cliente. É allowlist de propósito: com lista de
+   remoção, qualquer campo novo (ou renomeado) passa a vazar sozinho — foi
+   exatamente o que aconteceu com `notes` e `clientObs`, que são anotações
+   internas da equipe e estavam indo junto. */
+const CAMPOS_PUBLICOS_CONTRATO = [
+  'id', 'status', 'clientName', 'clientWpp', 'clientEmail', 'clientData',
+  'plans', 'finalM', 'finalP', 'disc', 'discObs', 'duration', 'due',
+  'payMethods', 'ctObs', 'createdAt', 'signedAt', 'autentiqueId', 'clientLink',
+];
 
 app.get('/api/contrato-link/:token', rateLimit({ windowMs: 60 * 1000, max: 30, chave: 'ctlink' }), async (req, res) => {
   try {
@@ -773,8 +1087,14 @@ app.get('/api/contrato-link/:token', rateLimit({ windowMs: 60 * 1000, max: 30, c
     if (!token) return res.status(400).json({ error: 'Link inválido.' });
     const r = await q('SELECT data FROM contratos WHERE client_link = $1 LIMIT 1', [token]);
     if (!r.rows.length) return res.status(404).json({ error: 'Contrato não encontrado para este link.' });
-    const data = r.rows[0].data || {};
-    ['internalNotes', 'history', 'lossReason', 'lossReasonObs', 'responsavel', 'origem', 'competencia'].forEach((k) => { delete data[k]; });
+    const completo = r.rows[0].data || {};
+    const data = {};
+    for (const k of CAMPOS_PUBLICOS_CONTRATO) if (completo[k] !== undefined) data[k] = completo[k];
+    registrarLog({
+      tipo: 'contratos', tipoLabel: 'Contrato', icon: '👁️',
+      action: 'Cliente abriu o link do contrato: ' + (completo.clientName || completo.id),
+      user: '(cliente, sem login)', refId: String(completo.id || ''),
+    });
     // O cliente não tem login, então não pode chamar /api/servicos (exigeAuth).
     // O catálogo vai embutido aqui só para resolver nomes de combos no contrato.
     const svc = await q('SELECT data FROM servicos ORDER BY criado_em');
@@ -823,7 +1143,17 @@ app.post('/api/contrato-link/:token', rateLimit({ windowMs: 60 * 1000, max: 20, 
 
     await cliente.query('UPDATE contratos SET data = $1::jsonb WHERE id = $2', [JSON.stringify(novo), r.rows[0].id]);
     await cliente.query('COMMIT');
-    res.json(novo);
+
+    registrarLog({
+      tipo: 'contratos', tipoLabel: 'Contrato', icon: '📋',
+      action: 'Cliente preencheu os dados no link: ' + (novo.clientName || novo.id),
+      user: '(cliente, sem login)', refId: String(novo.id || ''),
+    });
+
+    // Devolve só o que é público, pelo mesmo motivo do GET acima.
+    const publico = {};
+    for (const k of CAMPOS_PUBLICOS_CONTRATO) if (novo[k] !== undefined) publico[k] = novo[k];
+    res.json(publico);
   } catch (e) {
     await cliente.query('ROLLBACK').catch(() => {});
     console.error('[contrato-link] erro ao salvar:', e.message);
@@ -844,6 +1174,11 @@ async function marcarAssinadoNoBanco(documentId, signedAt) {
     const novo = Object.assign({}, atual, { status: 'Assinado', signedAt: signedAt || new Date().toISOString() });
     await cliente.query('UPDATE contratos SET data = $1::jsonb WHERE id = $2', [JSON.stringify(novo), r.rows[0].id]);
     await cliente.query('COMMIT');
+    registrarLog({
+      tipo: 'contratos', tipoLabel: 'Contrato', icon: '✍️',
+      action: 'Contrato ASSINADO pelo cliente: ' + (novo.clientName || novo.id),
+      user: '(Autentique)', refId: String(novo.id || ''),
+    });
     return novo;
   } catch (e) {
     await cliente.query('ROLLBACK').catch(() => {});
@@ -893,8 +1228,9 @@ async function exigeContratoValido(req, res, next) {
   try {
     const token = (req.body && req.body.clientLink) ? String(req.body.clientLink) : '';
     if (!token) return res.status(400).json({ error: 'Link do contrato ausente.' });
-    const r = await q('SELECT 1 FROM contratos WHERE client_link = $1 LIMIT 1', [token]);
+    const r = await q('SELECT data FROM contratos WHERE client_link = $1 LIMIT 1', [token]);
     if (!r.rows.length) return res.status(403).json({ error: 'Contrato não encontrado para este link.' });
+    req.contrato = r.rows[0].data || {}; // usado para fixar o destinatário
     next();
   } catch (e) {
     console.error('Falha ao validar contrato:', e.message);
@@ -913,14 +1249,24 @@ const mapaContratos = new Map();
 
 app.post('/autentique/criar-documento', exigeOrigemConhecida, rateLimit({ windowMs: 60 * 1000, max: 5 }), exigeContratoValido, async (req, res) => {
   try {
-    const { contratoId, nome, sandbox, signer, pdfBase64 } = req.body || {};
+    const { contratoId, nome, sandbox, pdfBase64 } = req.body || {};
     if (!contratoId || !RE_CONTRATO_ID.test(String(contratoId))) return res.status(400).json({ error: 'contratoId ausente ou inválido.' });
-    if (!signer || !signer.email || !RE_EMAIL.test(String(signer.email))) return res.status(400).json({ error: 'E-mail do signatário inválido.' });
     if (!pdfBase64 || !isBase64(pdfBase64)) return res.status(400).json({ error: 'pdfBase64 ausente ou inválido.' });
     if (pdfBase64.length > 12 * 1024 * 1024) return res.status(413).json({ error: 'Arquivo muito grande.' });
 
+    /* O destinatário vem do contrato GRAVADO, nunca do corpo da requisição:
+       antes, quem tivesse um link válido podia mandar e-mail com a identidade
+       da empresa para qualquer endereço que quisesse. */
+    const contrato = req.contrato || {};
+    const cd = contrato.clientData || {};
+    const emailDestino = String(cd.email || contrato.clientEmail || '').trim();
+    if (!RE_EMAIL.test(emailDestino)) {
+      return res.status(400).json({ error: 'O contrato não tem um e-mail válido cadastrado. Preencha os dados do cliente antes de assinar.' });
+    }
+    const signer = { email: emailDestino, name: String(cd.resp || contrato.clientName || 'Signatário').slice(0, 200) };
+
     const nomeDoc = String(nome || 'Contrato').slice(0, 200);
-    const signerName = String(signer.name || 'Signatário').slice(0, 200);
+    const signerName = signer.name;
 
     const query = `mutation CriarDocumento($document: DocumentInput!, $signers: [SignerInput!]!, $file: Upload!, $sandbox: Boolean) {
       createDocument(sandbox: $sandbox, document: $document, signers: $signers, file: $file) { id name signatures { public_id name email link { short_link } } }
@@ -981,9 +1327,12 @@ async function removerSignatario(documentId, publicId) {
   return json.data && json.data.deleteSigner;
 }
 
-app.post('/autentique/webhook', async (req, res) => {
+app.post('/autentique/webhook', rateLimit({ windowMs: 60 * 1000, max: 30, chave: 'wh' }), async (req, res) => {
   try {
-    if (WEBHOOK_SECRET && !segredoIgual(req.query.key, WEBHOOK_SECRET)) return res.status(401).send('unauthorized');
+    // Sem segredo configurado o endpoint fica FECHADO (antes ele apenas pulava
+    // a verificação, virando um gatilho aberto para qualquer um na internet).
+    if (!WEBHOOK_SECRET) return res.status(503).send('webhook nao configurado');
+    if (!segredoIgual(req.query.key, WEBHOOK_SECRET)) return res.status(401).send('unauthorized');
     const evento = req.body || {};
     const documentId = (evento.document && evento.document.id) || (evento.data && evento.data.document && evento.data.document.id) || evento.document_id || null;
     res.status(200).send('ok');
@@ -1217,5 +1566,10 @@ Promise.resolve()
   .then(() => garantirTabelas().catch((e) => console.error('[banco] garantirTabelas:', e && e.message)))
   .then(() => garantirUsuarios().catch((e) => console.error('[banco] garantirUsuarios:', e && e.message)))
   .finally(() => {
-    app.listen(PORT, () => console.log('Sistema Comercial — backend rodando em http://localhost:' + PORT));
+    app.listen(PORT, HOST, () => {
+      console.log('Sistema Comercial — backend rodando em http://' + HOST + ':' + PORT);
+      if (HOST !== '127.0.0.1' && HOST !== 'localhost') {
+        console.warn('[AVISO] HOST=' + HOST + ' — a API está exposta na rede. Use 127.0.0.1 a menos que você realmente precise de acesso externo.');
+      }
+    });
   });

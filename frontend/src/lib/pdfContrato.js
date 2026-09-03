@@ -7,7 +7,7 @@ import { renderContractHTML } from './contractDocument';
  * Gera o PDF do contrato renderizando o mesmo HTML usado na tela do cliente
  * (via jsPDF .html(), que usa html2canvas por baixo). Preserva 100% do texto legal.
  */
-export async function gerarPdfContrato(c, cd, services) {
+export async function gerarPdfContrato(c, cd, services, opts = {}) {
   const html = renderContractHTML(c, cd, services);
   const wrapper = document.createElement('div');
   wrapper.style.cssText = 'width:750px;padding:32px;font-family:Georgia,serif;font-size:13px;line-height:1.5;color:#1a1a2e;background:#fff;';
@@ -29,5 +29,11 @@ export async function gerarPdfContrato(c, cd, services) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   await doc.html(wrapper, { margin: [15, 15, 15, 15], autoPaging: 'text', width: 180, windowWidth: 750 });
   document.body.removeChild(wrapper);
+
+  // Para enviar à assinatura, o PDF vai em base64 no corpo da requisição
+  // em vez de ser baixado pelo navegador.
+  if (opts.retornarBase64) return doc.output('datauristring').split(',')[1];
+
   doc.save(`Contrato_${CO.name.replace(/\s+/g, '_')}_${sl(cd.razao || 'cliente')}.pdf`);
+  return null;
 }

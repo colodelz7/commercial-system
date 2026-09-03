@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { DB } from '../lib/db';
-import { gid, now, calcO, addHist, newClientToken, hojeISO, fmtComp } from '../lib/format';
+import { gid, now, calcO, addHist, hojeISO, fmtComp } from '../lib/format';
 
 export function validityInfo(o) {
   if (!o.createdAtRaw || !o.validity) return null;
@@ -120,7 +120,9 @@ export function useOrcamentos() {
       services: o.services, disc: o.disc, discMode: o.discMode,
       finalM: m, finalP: p, finalDisc: d, finalNet: net,
       duration: o.duration, payment: o.payment, finObs: o.finObs,
-      clientLink: newClientToken(), history: [], origemOrcId: o.id,
+      // O link de assinatura é criado depois, pelo servidor, no botão
+      // "Gerar Link para o Cliente" (token com aleatoriedade forte).
+      clientLink: null, history: [], origemOrcId: o.id,
     };
     addHist(contrato, 'Contrato gerado a partir do orçamento Nº ' + (o.seq || '?'), '📄');
     DB.saveContrato(contrato);

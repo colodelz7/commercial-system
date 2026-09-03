@@ -6,6 +6,19 @@ const { q } = require('../lib/db');
 
 const ORIGENS_VALIDAS = ['Indicação', 'Instagram', 'Google', 'WhatsApp', 'Prospecção ativa', 'Cliente antigo', 'Tráfego pago', 'Evento', 'Outro'];
 
+/** Registra no histórico o que o assistente fez (fica junto do resto na aba Histórico). */
+async function registrarLogBot(action, usuarioNome, refId) {
+  try {
+    const id = 'log' + Date.now() + Math.random().toString(36).slice(2, 7);
+    const rec = {
+      id, tipo: 'bot', tipoLabel: 'MorningBot', icon: '🤖', action,
+      time: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+      user: usuarioNome || '', refId: refId || '', ip: '',
+    };
+    await q('INSERT INTO logs (id, data) VALUES ($1, $2::jsonb) ON CONFLICT (id) DO NOTHING', [id, JSON.stringify(rec)]);
+  } catch (e) { console.error('[bot] falha ao registrar log:', e.message); }
+}
+
 function ymAtual() {
   const d = new Date();
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
@@ -67,6 +80,26 @@ async function resumoComercial(args) {
   };
 }
 
+/* LGPD: o que sai daqui vai para a API do Google. Documento, telefone e e-mail
+   são mascarados — dá para o assistente confirmar "é esse cliente mesmo" sem
+   entregar o dado pessoal completo a um terceiro. */
+function mascararDoc(v) {
+  const d = String(v || '').replace(/\D/g, '');
+  if (d.length < 5) return v ? '***' : '';
+  return '***' + d.slice(-4);
+}
+function mascararTelefone(v) {
+  const d = String(v || '').replace(/\D/g, '');
+  if (d.length < 5) return v ? '***' : '';
+  return '(' + d.slice(0, 2) + ') ****-' + d.slice(-4);
+}
+function mascararEmail(v) {
+  const s = String(v || '');
+  const i = s.indexOf('@');
+  if (i < 1) return s ? '***' : '';
+  return s[0] + '***' + s.slice(i);
+}
+
 async function buscarClientes(args) {
   const termo = normalizarTexto(args && args.busca);
   if (!termo) return { clientes: [], aviso: 'Informe um termo de busca.' };
@@ -78,8 +111,14 @@ async function buscarClientes(args) {
       return alvo.includes(termo);
     })
     .slice(0, 8)
-    .map((c) => ({ id: c.id, name: c.name, doc: c.doc, wpp: c.wpp, email: c.email, cidade: c.cidade }));
-  return { clientes: encontrados };
+    .map((c) => ({
+      id: c.id, name: c.name, cidade: c.cidade,
+      doc: mascararDoc(c.doc), wpp: mascararTelefone(c.wpp), email: mascararEmail(c.email),
+    }));
+  return {
+    clientes: encontrados,
+    aviso: 'Documento, telefone e e-mail vêm mascarados por proteção de dados. Os dados completos ficam na aba Clientes.',
+  };
 }
 
 async function carregarCatalogo() {
@@ -144,6 +183,7 @@ async function criarOrcamento(args, contexto) {
   };
 
   await q('INSERT INTO orcamentos (id, data) VALUES ($1, $2::jsonb)', [id, JSON.stringify(orcamento)]);
+  await registrarLogBot('Orçamento criado pelo MorningBot: Nº ' + String(seq).padStart(4, '0') + ' — ' + clientName, (contexto && contexto.nome) || '', id);
 
   const totalMensal = resolvidos.filter((s) => s.bill === 'mensal').reduce((a, s) => a + s.price, 0);
   const totalPontual = resolvidos.filter((s) => s.bill === 'pontual').reduce((a, s) => a + s.price, 0);

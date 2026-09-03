@@ -45,19 +45,34 @@ async function _bootstrap() {
 }
 
 /* ---------- autenticação ---------- */
+/**
+ * Devolve { ok } no sucesso ou { ok:false, erro, bloqueado, segundos,
+ * tentativasRestantes } — a tela de login precisa desses detalhes para
+ * mostrar o cronômetro de bloqueio e quantas tentativas ainda restam.
+ */
 async function login(usuario, senha) {
-  try {
-    const d = await _fetchJson(`${API}/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ usuario, senha }),
-    });
-    _sessao = d.usuario;
-    await _bootstrap();
-    return true;
-  } catch (e) {
-    return false;
+  const resp = await fetch(`${API}/login`, {
+    credentials: 'include',
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ usuario, senha }),
+  }).catch(() => null);
+
+  if (!resp) return { ok: false, erro: 'Sem conexão com o servidor.' };
+  const d = await resp.json().catch(() => ({}));
+
+  if (!resp.ok) {
+    return {
+      ok: false,
+      erro: d.error || 'Não consegui entrar.',
+      bloqueado: !!d.bloqueado,
+      segundos: Number(d.segundos) || 0,
+      tentativasRestantes: d.tentativasRestantes,
+    };
   }
+  _sessao = d.usuario;
+  await _bootstrap();
+  return { ok: true };
 }
 
 async function logout() {
@@ -84,15 +99,19 @@ function getSessao() { return _sessao; }
 function _crud(tabela) {
   const getAll = () => _cache[tabela] || [];
 
+  // Atualiza o cache na hora (a tela responde imediato) e devolve a promise
+  // da gravação — quem precisa esperar o servidor (ex.: gerar o link do
+  // contrato logo depois de salvar) pode dar await; o resto ignora.
   const saveOne = (item) => {
     const list = getAll().slice();
     const idx = list.findIndex((x) => x.id === item.id);
     if (idx >= 0) list[idx] = item; else list.push(item);
     _cache[tabela] = list;
-    _fetchJson(`${API}/${tabela}`, {
+    // Nunca rejeita (senão quem não dá await geraria unhandled rejection):
+    // resolve para true/false dizendo se o servidor aceitou.
+    return _fetchJson(`${API}/${tabela}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item),
-    }).catch((e) => console.error(`[db] falha ao salvar em ${tabela}:`, e.message));
-    return true;
+    }).then(() => true).catch((e) => { console.error(`[db] falha ao salvar em ${tabela}:`, e.message); return false; });
   };
 
   // Substitui a tabela inteira (usado por sincronizações de catálogo/lote).

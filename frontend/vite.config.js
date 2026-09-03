@@ -5,9 +5,11 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
+    // 127.0.0.1 explícito (e não "localhost"): o backend escuta só em IPv4, e
+    // "localhost" pode resolver para ::1 primeiro e derrubar o proxy.
     proxy: {
-      '/api': 'http://localhost:3000',
-      '/autentique': 'http://localhost:3000',
+      '/api': 'http://127.0.0.1:3000',
+      '/autentique': 'http://127.0.0.1:3000',
     },
   },
 })

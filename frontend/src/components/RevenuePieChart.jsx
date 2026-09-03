@@ -36,15 +36,10 @@ export default function RevenuePieChart({ arr, total }) {
     onHover: (_evt, elements) => setAtivo(elements.length ? elements[0].index : null),
     plugins: {
       legend: { display: false },
-      tooltip: {
-        callbacks: {
-          label: (ctx) => {
-            const v = ctx.parsed;
-            const pct = total > 0 ? Math.round((v / total) * 100) : 0;
-            return ` ${R(v)} (${pct}%)`;
-          },
-        },
-      },
+      // Balão desligado de propósito: ele era desenhado por cima do texto do
+      // centro da rosca e os dois ficavam embaralhados. O valor e a categoria
+      // já aparecem no centro (e destacados na legenda) ao passar o mouse.
+      tooltip: { enabled: false },
     },
   }), [total]);
 

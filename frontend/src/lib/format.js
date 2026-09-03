@@ -2,10 +2,10 @@
 
 export function gid() { return 'id' + Date.now() + Math.random().toString(36).slice(2, 5); }
 
-export function newClientToken() {
-  try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch { /* ignora */ }
-  return 'ct-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
-}
+/* O token do link de contrato NÃO é mais gerado aqui: fora de contexto seguro
+   (HTTP na rede) crypto.randomUUID não existe e o fallback com Math.random
+   produzia token adivinhável. Agora quem gera é o servidor, com
+   crypto.randomBytes — ver POST /api/contratos/:id/link. */
 
 function _semCent(v) { return Math.round((Number(v) || 0) * 100) % 100 === 0; }
 
@@ -24,7 +24,13 @@ export function compactBRL(v) {
   return 'R$ ' + v;
 }
 
-export function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+// Escapa também aspas: sem isso, usar esc() dentro de um atributo HTML
+// (value="...", title="...") deixaria escapar um XSS silenciosamente.
+export function esc(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 export function sl(s) { return String(s || '').toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '').slice(0, 28); }
 export function now() { return new Date().toLocaleString('pt-BR'); }
 

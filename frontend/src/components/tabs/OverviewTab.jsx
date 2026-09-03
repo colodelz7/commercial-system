@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { R, fmtSeq, calcO } from '../../lib/format';
 import { useOverviewPeriod } from '../../hooks/useOverviewPeriod';
 import { useRevenueChart } from '../../hooks/useRevenueChart';
@@ -9,11 +9,22 @@ const PERIODOS = [
   { v: 'all', l: 'Tudo' }, { v: '1', l: 'Este mês' }, { v: '3', l: '3 meses' },
   { v: '6', l: '6 meses' }, { v: '12', l: '12 meses' },
 ];
+const MESES_NOME = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 
 export default function OverviewTab({ orcamentos, contratos, spots, onAbrirOrc, onAbrirCt, onAbrirSpot }) {
   const ov = useOverviewPeriod();
   const chart = useRevenueChart(contratos.items, spots.items, calcO);
   const [diaInfo, setDiaInfo] = useState(null);
+
+  // Escolher um mês na barra de período leva o gráfico de receita junto,
+  // para a tela inteira falar do mesmo período.
+  useEffect(() => {
+    if (ov.ovPeriod !== 'mes') return;
+    chart.setChartPeriod(1);
+    chart.setChartMonth(ov.mesSel);
+    chart.setChartYear(ov.anoSel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ov.ovPeriod, ov.mesSel, ov.anoSel]);
 
   const fOrc = ov.filtrar(orcamentos.items);
   const fCt = ov.filtrar(contratos.items);
@@ -59,12 +70,25 @@ export default function OverviewTab({ orcamentos, contratos, spots, onAbrirOrc, 
         {PERIODOS.map((p) => (
           <button key={p.v} className={`ovp${ov.ovPeriod === p.v ? ' active' : ''}`} onClick={() => ov.selecionarPeriodo(p.v)}>{p.l}</button>
         ))}
+        <span className={`ov-mes-group${ov.ovPeriod === 'mes' ? ' active' : ''}`}>
+          <span className="ov-mes-lbl">Mês</span>
+          <select className="ov-mes-sel" value={ov.mesSel} onChange={(e) => ov.selecionarMes(parseInt(e.target.value, 10), ov.anoSel)}>
+            {MESES_NOME.map((m, i) => <option key={m} value={i}>{m}</option>)}
+          </select>
+          <select className="ov-mes-sel ano" value={ov.anoSel} onChange={(e) => ov.selecionarMes(ov.mesSel, parseInt(e.target.value, 10))}>
+            {[ov.anoSel - 2, ov.anoSel - 1, ov.anoSel, ov.anoSel + 1].map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </span>
         <span className={`ov-date-group${ov.ovPeriod === 'custom' ? ' active' : ''}`}>
           <label className="ov-date-lbl">De <input type="date" className="rel-date" value={ov.ovFrom} onChange={(e) => ov.aplicarCustom(e.target.value, ov.ovTo)} /></label>
           <label className="ov-date-lbl">Até <input type="date" className="rel-date" value={ov.ovTo} onChange={(e) => ov.aplicarCustom(ov.ovFrom, e.target.value)} /></label>
           <button className="ov-date-clear" type="button" title="Limpar intervalo" onClick={ov.limparCustom}>✕</button>
         </span>
       </div>
+
+      {ov.ovPeriod === 'mes' && (
+        <p className="ov-mes-aviso">Mostrando apenas <strong>{MESES_NOME[ov.mesSel]} de {ov.anoSel}</strong>. Os indicadores, o gráfico e a atividade recente abaixo consideram só esse mês.</p>
+      )}
 
       <div className="kpi-grid">
         <div className="kpi"><div className="kpi-ic cyan"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg></div><div><p className="kpi-lbl">Total Orçamentos</p><p className="kpi-val">{kpis.orc}</p></div></div>
