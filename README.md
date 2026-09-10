@@ -113,4 +113,4 @@ As integrações externas (Autentique, Meta Ads, MorningBot/Gemini, e-mail e Wha
 
 ## 📄 Licença
 
-MIT. Veja o arquivo [LICENSE](LICENSE).
+Todos os direitos reservados. O código está público apenas para leitura e avaliação técnica, não para uso, cópia ou modificação. Veja o arquivo [LICENSE](LICENSE).

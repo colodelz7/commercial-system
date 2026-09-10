@@ -1,21 +1,27 @@
-MIT License
+Todos os direitos reservados
 
 Copyright (c) 2026 Guilherme Colodel
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Este código é disponibilizado publicamente apenas para leitura, avaliação
+técnica e demonstração de portfólio.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+É PERMITIDO:
+  - Visualizar e ler o código-fonte.
+  - Avaliar o projeto para fins de recrutamento, estudo ou referência técnica.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+NÃO É PERMITIDO, sem autorização prévia e por escrito do autor:
+  - Copiar, reproduzir ou redistribuir o código, no todo ou em parte.
+  - Modificar, adaptar ou criar trabalhos derivados.
+  - Utilizar o código, no todo ou em parte, em projetos próprios ou de
+    terceiros, sejam eles comerciais ou não.
+  - Publicar, sublicenciar, vender ou ceder o código a terceiros.
+
+Nenhuma licença de uso é concedida por este documento. Todos os direitos não
+expressamente concedidos acima permanecem reservados ao autor.
+
+Para solicitar autorização de uso, entre em contato com o autor.
+
+ISENÇÃO DE GARANTIA: este software é fornecido "como está", sem garantia de
+qualquer natureza, expressa ou implícita. Em nenhuma hipótese o autor será
+responsabilizado por qualquer reclamação, dano ou outra responsabilidade
+decorrente do software ou de seu uso.
